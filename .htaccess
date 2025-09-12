@@ -1,0 +1,42 @@
+# Handle routing for the Clippy application
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  
+  # Don't rewrite files or directories
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  
+  # Directly serve the API requests
+  RewriteRule ^api/(.*)$ api/$1 [L]
+  
+  # Serve static assets from the build directory
+  RewriteRule ^(assets/.*)$ dist/$1 [L]
+  
+  # Route everything else through index.php
+  RewriteRule ^ index.php [L]
+</IfModule>
+
+# Set security headers
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set Referrer-Policy "no-referrer-when-downgrade"
+</IfModule>
+
+# PHP settings
+<IfModule mod_php7.c>
+  # Increase memory limit if needed
+  php_value memory_limit 128M
+  
+  # Maximum allowed time for PHP script to run
+  php_value max_execution_time 30
+  
+  # Maximum size of POST data
+  php_value post_max_size 8M
+  
+  # Maximum upload file size
+  php_value upload_max_filesize 2M
+</IfModule>
