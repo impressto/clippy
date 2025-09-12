@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { createHashRouter, RouterProvider, Link, useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import './App.css';
@@ -16,13 +16,8 @@ function TextShareApp() {
   const [lastSaved, setLastSaved] = useState(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [updatesAvailable, setUpdatesAvailable] = useState(false);
-  const [lastChecked, setLastChecked] = useState(new Date()); // Initialize with current date
-  const [contentChecked, setContentChecked] = useState(true); // Start with contentChecked true
-  const [showShareOptions, setShowShareOptions] = useState(false); // Hide share options by default
-  
-  // Use a ref to store the lastServerText that persists across renders
-  // This will be shared between all our functions
-  const lastServerTextRef = useRef('');
+  const [lastChecked, setLastChecked] = useState(null);
+  const [contentChecked, setContentChecked] = useState(false); // Track if we've done content comparison
 
   // Helper function for deep text comparison
   const areTextsEqual = (a, b) => {
@@ -30,63 +25,8 @@ function TextShareApp() {
     const normalizeText = (text) => text.trim().replace(/\r\n/g, '\n');
     return normalizeText(a) === normalizeText(b);
   };
-
-  // This function is replaced with a more stable version in the useEffect
-  // It's still used for manual "Check Updates" button clicks
-  const checkForUpdates = async () => {
-    try {
-      console.log('🔍 Manual check initiated');
-      console.log('📊 Before manual check - lastServerText state:', lastServerText.length);
-      
-      // Add timestamp to URL to prevent caching issues
-      const cacheBreaker = new Date().getTime();
-      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&t=${cacheBreaker}`);
-      const data = await response.json();
-      
-      if (data.text !== undefined) {
-        const newServerText = data.text;
         
-        // Direct string comparison for determining changes
-        const hasChanged = newServerText !== lastServerText;
-        const isDifferentFromEditor = newServerText !== text;
-        
-        // Store the server response
-        setServerText(newServerText);
-        
-        // Debug information to help diagnose comparison issues
-        console.log('Manual update check:', { 
-          newTextLength: newServerText.length,
-          lastServerTextLength: lastServerText.length,
-          editorTextLength: text.length,
-          hasChanged,
-          isDifferentFromEditor,
-          newTextStart: newServerText.substring(0, 30),
-          lastServerTextStart: lastServerText.substring(0, 30)
-        });
-        
-        // ONLY show updates when:
-        // 1. The text from server is different from our last known server state AND
-        // 2. It's different from what's currently in the editor AND
-        // 3. It's not empty
-        if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
-          console.log('⭐ New updates detected - showing update button');
-          setUpdatesAvailable(true);
-        } else {
-          console.log('✓ No meaningful changes - hiding update button');
-          setUpdatesAvailable(false);
-        }
-        
-        // Important: Always update our record of the last server text after each check
-        setLastServerText(newServerText);
-        console.log('📝 Updated lastServerText to:', newServerText.length, 'characters');
-        setLastChecked(new Date());
-        setContentChecked(true);
-        setContentChecked(true);
-      }
-    } catch (error) {
-      console.error('Error checking for updates:', error);
-    }
-  };
+        };
 
   // Apply updates from server
   const applyUpdates = () => {
@@ -96,14 +36,12 @@ function TextShareApp() {
     
     // Update our reference of what the server has
     setLastServerText(serverText);
-    lastServerTextRef.current = serverText; // Update ref too
     
     // Clear update notification
     setUpdatesAvailable(false);
     setStatus('updated');
     
     console.log('✅ Updates applied - text synchronized with server');
-    console.log('🔄 Updated ref after applying updates:', serverText.length, 'characters');
   };
 
   // Initial load of text from server
@@ -113,24 +51,29 @@ function TextShareApp() {
       
       const response = await fetch(`${API_BASE_URL}/share.php?id=${id}`);
       const data = await response.json();
+      
       if (data.text !== undefined) {
+        // Get the initial text exactly as it comes from the server
         const initialText = data.text;
         
         console.log('📋 Initial text state:', {
-          initialTextLength: initialText.length,
-          initialTextStart: initialText.substring(0, 30)
+          textLength: initialText.length,
+          initialTextStart: initialText.substring(0, 30),
         });
         
+        // Set all state variables to match this initial state
         setText(initialText);
         setSavedText(initialText);
         setServerText(initialText);
-        setLastServerText(initialText); // Store initial text as last server text
-        lastServerTextRef.current = initialText; // Also store in our ref
+        setLastServerText(initialText); // Critical: initialize last known server state
+        
+        // Debug log to confirm state was set
+        console.log('🔄 Setting lastServerText to:', initialText.length, 'characters');
+        
         setHasChanges(false);
+        setUpdatesAvailable(false); // Ensure no update notification on initial load
         
         console.log('🚀 Initial text loaded from server');
-        console.log('🔄 Initial lastServerText length:', initialText.length);
-        console.log('🔄 Initial ref value length:', lastServerTextRef.current.length);
       }
     } catch (error) {
       console.error('Error loading initial text:', error);
@@ -158,11 +101,8 @@ function TextShareApp() {
       setSavedText(textToSave);
       setServerText(textToSave);
       setLastServerText(textToSave); // Critical: Update last known server state
-      lastServerTextRef.current = textToSave; // Also update our ref
       setHasChanges(false);
       setUpdatesAvailable(false);
-      
-      console.log('💾 Saved and updated ref to:', textToSave.length, 'characters');
       
       console.log('💾 Text saved to server and state synchronized');
     } catch (error) {
@@ -180,11 +120,14 @@ function TextShareApp() {
     // Initial load
     initialLoad();
     
-    // Define a wrapped check function that uses our ref for stable state between calls
-    const stableCheckFunction = async () => {
+    // Store a reference to the current server text for comparison
+    let currentServerTextRef = '';
+    
+    // Define a wrapped check function that preserves state
+    const wrappedCheckForUpdates = async () => {
       try {
-        console.log('📊 Before check - lastServerText state variable:', lastServerText.length);
-        console.log('📊 Before check - ref variable:', lastServerTextRef.current.length);
+        // Grab the current server text from the closure before the check
+        console.log('📊 Before check - lastServerText length:', currentServerTextRef.length);
         
         // Add timestamp to URL to prevent caching issues
         const cacheBreaker = new Date().getTime();
@@ -194,51 +137,44 @@ function TextShareApp() {
         if (data.text !== undefined) {
           const newServerText = data.text;
           
-          // Compare with our ref value
-          const hasChanged = newServerText !== lastServerTextRef.current;
+          // Compare with our reference value
+          const hasChanged = newServerText !== currentServerTextRef;
+          const isDifferentFromEditor = newServerText !== text;
           
-          // We need to get the current text value directly rather than from closure
-          // to avoid re-creating the effect on every keystroke
-          const currentText = text; // Get current text from state
-          const isDifferentFromEditor = newServerText !== currentText;
-          
-          console.log('🔍 Server check comparison:', { 
-            newServerLength: newServerText.length,
-            refLastServerLength: lastServerTextRef.current.length,
-            reactStateLastServerLength: lastServerText.length, 
-            currentTextLength: currentText.length,
+          console.log('🔍 Comparison:', { 
+            currentRefLength: currentServerTextRef.length,
+            newServerTextLength: newServerText.length,
             hasChanged,
             isDifferentFromEditor
           });
           
-          // Store the server response in React state
+          // Update our UI state
           setServerText(newServerText);
           
+          // Only show updates for real changes from last check
           if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
-            console.log('⭐ New updates available!');
             setUpdatesAvailable(true);
+            console.log('⭐ New updates available');
           } else {
             setUpdatesAvailable(false);
           }
           
-          // Update our stable reference AND the React state
-          lastServerTextRef.current = newServerText;
+          // Most importantly: update our reference for next time
+          currentServerTextRef = newServerText;
           setLastServerText(newServerText);
           setLastChecked(new Date());
           setContentChecked(true);
-          
-          console.log('✅ Updated ref to:', lastServerTextRef.current.length, 'characters');
         }
       } catch (error) {
-        console.error('Error in stable check function:', error);
+        console.error('Error checking for updates:', error);
       }
     };
     
     // Set up polling with our wrapped function
-    const interval = setInterval(stableCheckFunction, 10000);
+    const interval = setInterval(wrappedCheckForUpdates, 10000);
     
     return () => clearInterval(interval);
-  }, [id]); // Only depend on id, not text
+  }, [id, text]); // Include text in dependencies to compare with current editor state
 
   const handleTextChange = (e) => {
     const newText = e.target.value;
@@ -248,16 +184,12 @@ function TextShareApp() {
   };
 
   const getShareUrl = () => {
-    return window.location.href;
+    return `${window.location.origin}/clippy/#/share/${id}`;
   };
   
-  // Manual check function for the "Check Updates" button
+  // Manual update check function
   const manualCheckForUpdates = async () => {
     try {
-      console.log('🔍 Manual check initiated');
-      console.log('📊 Before manual check - lastServerText length:', lastServerText.length);
-      console.log('📊 Before manual check - ref length:', lastServerTextRef.current.length);
-      
       // Add timestamp to URL to prevent caching issues
       const cacheBreaker = new Date().getTime();
       const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&t=${cacheBreaker}`);
@@ -266,38 +198,35 @@ function TextShareApp() {
       if (data.text !== undefined) {
         const newServerText = data.text;
         
-        // Direct string comparison for determining changes
-        const hasChanged = newServerText !== lastServerTextRef.current; // Use ref for comparison
+        // Compare with our reference value
+        const hasChanged = newServerText !== lastServerText;
         const isDifferentFromEditor = newServerText !== text;
         
-        // Store the server response
-        setServerText(newServerText);
-        
-        console.log('Manual check results:', {
-          newTextLength: newServerText.length,
+        console.log('🔍 Manual check comparison:', { 
           lastServerTextLength: lastServerText.length,
+          newServerTextLength: newServerText.length,
           hasChanged,
           isDifferentFromEditor
         });
         
+        // Update our UI state
+        setServerText(newServerText);
+        
+        // Only show updates for real changes from last check
         if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
           setUpdatesAvailable(true);
-          console.log('⭐ Manual check: Updates available');
+          console.log('⭐ New updates available (manual check)');
         } else {
           setUpdatesAvailable(false);
-          console.log('✓ Manual check: No updates needed');
         }
         
         // Update our state
         setLastServerText(newServerText);
-        lastServerTextRef.current = newServerText; // Update ref too
         setLastChecked(new Date());
         setContentChecked(true);
-        
-        console.log('✅ Manual check: Updated ref to:', lastServerTextRef.current.length, 'characters');
       }
     } catch (error) {
-      console.error('Error in manual check:', error);
+      console.error('Error manually checking for updates:', error);
     }
   };
 
@@ -305,7 +234,7 @@ function TextShareApp() {
     <div className="text-share-container">
       <h1>Text Share</h1>
       
-            {updatesAvailable ? (
+      {updatesAvailable ? (
         <div className="updates-banner">
           <span>New updates available!</span>
           <button 
@@ -317,6 +246,7 @@ function TextShareApp() {
           {lastChecked && (
             <span className="last-checked">
               · Last checked: {lastChecked.toLocaleTimeString()}
+              {contentChecked ? ' (content checked)' : ''}
             </span>
           )}
         </div>
@@ -331,6 +261,7 @@ function TextShareApp() {
             )}
             <span className="last-checked">
               · Last checked: {lastChecked.toLocaleTimeString()}
+              {contentChecked ? ' (content checked)' : ''}
             </span>
           </span>
         </div>
@@ -362,13 +293,6 @@ function TextShareApp() {
           >
             Check Updates
           </button>
-          
-          <button 
-            className="share-toggle-button"
-            onClick={() => setShowShareOptions(prev => !prev)}
-          >
-            {showShareOptions ? 'Hide Share' : 'Share'}
-          </button>
         </div>
         
         <div className="status">
@@ -394,35 +318,33 @@ function TextShareApp() {
         </div>
       </div>
       
-      {showShareOptions && (
-        <div className="share-info">
-          <p>Share this URL with others to collaborate:</p>
-          <div className="share-container">
-            <div className="share-url">
-              <input
-                type="text"
-                readOnly
-                value={getShareUrl()}
-                onClick={(e) => e.target.select()}
-              />
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(getShareUrl());
-                  alert('URL copied to clipboard!');
-                }}
-              >
-                Copy
-              </button>
+      <div className="share-info">
+        <p>Share this URL with others to collaborate:</p>
+        <div className="share-container">
+          <div className="share-url">
+            <input
+              type="text"
+              readOnly
+              value={getShareUrl()}
+              onClick={(e) => e.target.select()}
+            />
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(getShareUrl());
+                alert('URL copied to clipboard!');
+              }}
+            >
+              Copy
+            </button>
+          </div>
+          <div className="qr-code-container">
+            <div className="qr-code">
+              <QRCodeSVG value={getShareUrl()} size={128} />
             </div>
-            <div className="qr-code-container">
-              <div className="qr-code">
-                <QRCodeSVG value={getShareUrl()} size={128} />
-              </div>
-              <p className="qr-code-label">Scan with your phone</p>
-            </div>
+            <p className="qr-code-label">Scan with your phone</p>
           </div>
         </div>
-      )}
+      </div>
       
       <div className="navigation">
         <Link to="/" className="home-link">Return to Home</Link>
