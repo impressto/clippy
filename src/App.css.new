@@ -17,50 +17,19 @@
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
 }
 
-.app-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.app-title {
-  display: flex;
-  align-items: center;
-}
-
 .app-logo {
   height: 50px;
   margin-right: 15px;
 }
 
-.header-status {
-  font-size: 0.85rem;
-  color: #0c5460;
-  background-color: #e7f5ff;
-  border: 1px solid #cce5ff;
-  border-radius: 4px;
-  padding: 0.4rem 0.75rem;
-  display: flex;
-  align-items: center;
-}
-
-.header-updates {
-  font-size: 0.85rem;
-  color: #856404;
-  background-color: #fff3cd;
-  border: 1px solid #ffeeba;
-  border-radius: 4px;
-  padding: 0.4rem 0.75rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .button-icon {
   margin-right: 8px;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1.5rem;
 }
 
 .app {
@@ -233,12 +202,10 @@
   color: #212529;
   border: none;
   border-radius: 4px;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
   font-weight: bold;
   cursor: pointer;
   transition: all 0.2s;
-  white-space: nowrap;
 }
 
 .refresh-button:hover {
@@ -572,104 +539,22 @@
   border: none;
 }
 
-.share-with-seed {
-  margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--border-color);
+.modal-content .share-container {
+  flex-direction: column;
 }
 
-.share-seed-heading {
-  font-weight: bold;
-  margin-bottom: 1rem;
-  color: var(--primary-color);
+.modal-content .qr-code-container {
+  margin-top: 1.5rem;
 }
 
-.share-seed-description {
-  font-size: 0.85rem;
-  color: #666;
-  margin-top: 0.75rem;
-  font-style: italic;
-}
-
-.share-new-session {
-  margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--border-color);
-}
-
-.create-new-session-button {
-  background-color: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 0.8rem 1.5rem;
-  font-size: 1rem;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: block;
-  width: 100%;
-  max-width: 300px;
-  margin: 1rem 0;
-}
-
-.create-new-session-button:hover:not(:disabled) {
-  background-color: var(--secondary-color);
-  transform: translateY(-1px);
-}
-
-.create-new-session-button:disabled {
-  background-color: #b4b4b4;
-  cursor: not-allowed;
-}
-
-.new-session-created {
-  background-color: #f0f8ff;
-  padding: 1rem;
-  border-radius: 8px;
-  margin: 1rem 0;
-  border: 1px solid #cce5ff;
-}
-
-.new-session-created p {
-  margin-top: 0;
-  font-weight: bold;
-  color: var(--primary-color);
-}
-
-.session-buttons {
-  display: flex;
-  gap: 1rem;
-  margin-top: 1rem;
-}
-
-.go-to-session-button {
-  background-color: var(--primary-color);
-  color: white;
-  text-decoration: none;
-  padding: 0.6rem 1rem;
-  border-radius: 4px;
-  font-weight: bold;
-  flex: 1;
-  text-align: center;
-  transition: all 0.2s;
-}
-
-.go-to-session-button:hover {
-  background-color: var(--secondary-color);
-  transform: translateY(-1px);
-}
-
-.reset-session-button {
-  background-color: #6c757d;
-  color: white;
-  border: none;
-  padding: 0.6rem 1rem;
-  border-radius: 4px;
-  font-weight: bold;
-  cursor: pointer;
-  flex: 1;
-  transition: all 0.2s;
+@media (min-width: 768px) {
+  .modal-content .share-container {
+    flex-direction: row;
+  }
+  
+  .modal-content .qr-code-container {
+    margin-top: 0;
+  }
 }
 
 /* Responsive adjustments */
@@ -690,18 +575,6 @@
     flex-wrap: wrap;
   }
   
-  .app-header {
-    margin-bottom: 1rem;
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  
-  .header-status,
-  .header-updates {
-    margin-top: 0.5rem;
-    width: 100%;
-  }
-  
   .share-toggle-button,
   .check-updates-button,
   .save-button {
@@ -712,5 +585,9 @@
   .app-logo {
     height: 40px;
     margin-right: 10px;
+  }
+  
+  .app-header {
+    margin-bottom: 1rem;
   }
 }

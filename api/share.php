@@ -108,6 +108,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// Load text status (lightweight endpoint for polling)
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && $id && isset($_GET['status'])) {
+    try {
+        if (file_exists($filename)) {
+            // Get file metadata
+            $mtime = filemtime($filename);
+            $checksum = md5_file($filename);
+            $size = filesize($filename);
+            
+            echo json_encode([
+                'exists' => true,
+                'modified' => $mtime,
+                'modified_iso' => date('c', $mtime),
+                'checksum' => $checksum,
+                'size' => $size
+            ]);
+        } else {
+            // File doesn't exist
+            echo json_encode([
+                'exists' => false
+            ]);
+        }
+    } catch (Exception $e) {
+        echo json_encode([
+            'status' => 'error', 
+            'message' => 'Could not retrieve text status',
+            'debug' => $e->getMessage()
+        ]);
+    }
+    exit;
+}
+
 // Load text
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $id) {
     try {

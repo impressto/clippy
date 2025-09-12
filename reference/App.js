@@ -37,7 +37,7 @@ function TextShareApp() {
 
     return (
         <div>
-            <h1>Text Share</h1>
+            <h1>Clippy</h1>
             <textarea value={text} onChange={handleTextChange} />
             <p>Share this URL: {window.location.href}</p>
         </div>
@@ -57,7 +57,7 @@ function Home() {
 
     return (
         <div>
-            <h1>Welcome to Text Share</h1>
+            <h1>Welcome to Text Clippy</h1>
             {uniqueId && <Link to={`/share/${uniqueId}`}>Start Sharing</Link>}
         </div>
     );

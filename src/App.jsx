@@ -1,13 +1,49 @@
 import { useState, useEffect, useRef } from 'react';
 import { createHashRouter, RouterProvider, Link, useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { 
+  faSave, 
+  faSync, 
+  faShare, 
+  faEye, 
+  faEyeSlash, 
+  faCopy, 
+  faPlay, 
+  faHome 
+} from '@fortawesome/free-solid-svg-icons';
 import './App.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const LOGO_URL = import.meta.env.VITE_LOGO_URL || '/clippy.png';
 
 // TextShareApp Component
 function TextShareApp() {
-  const { id } = useParams(); // Get id from URL parameter with hash routing
+  // Helper function to encode text to base64
+  const encodeTextToBase64 = (text) => {
+    try {
+      return btoa(encodeURIComponent(text));
+    } catch (e) {
+      console.error('Error encoding text to base64:', e);
+      return '';
+    }
+  };
+  
+  // Helper function to decode base64 text
+  const decodeTextFromBase64 = (encoded) => {
+    try {
+      return decodeURIComponent(atob(encoded));
+    } catch (e) {
+      console.error('Error decoding base64 text:', e);
+      return '';
+    }
+  };
+
+  const { id, seedData } = useParams(); // Get id and seedData from URL parameter with hash routing
+  
+  // Decode the seed text if it exists from path parameter
+  const seedText = seedData ? decodeTextFromBase64(seedData) : '';
+  
   const [text, setText] = useState('');
   const [savedText, setSavedText] = useState('');
   const [serverText, setServerText] = useState('');
@@ -19,10 +55,15 @@ function TextShareApp() {
   const [lastChecked, setLastChecked] = useState(new Date()); // Initialize with current date
   const [contentChecked, setContentChecked] = useState(true); // Start with contentChecked true
   const [showShareOptions, setShowShareOptions] = useState(false); // Hide share options by default
+  const [showShareModal, setShowShareModal] = useState(false); // For the share modal
+  const [isInitialized, setIsInitialized] = useState(false); // Track if we've initialized with seed text
   
   // Use a ref to store the lastServerText that persists across renders
   // This will be shared between all our functions
   const lastServerTextRef = useRef('');
+  
+  // Create a ref for the current checksum
+  const currentChecksumRef = useRef('');
 
   // Helper function for deep text comparison
   const areTextsEqual = (a, b) => {
@@ -111,9 +152,45 @@ function TextShareApp() {
     try {
       console.log('📥 Starting initial load...');
       
+      // First, fetch the text content
       const response = await fetch(`${API_BASE_URL}/share.php?id=${id}`);
       const data = await response.json();
-      if (data.text !== undefined) {
+      
+      // Also get the status data to store the initial checksum
+      const statusResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&status=1`);
+      const statusData = await statusResponse.json();
+      
+      // Update checksum reference if available
+      if (statusData.exists && statusData.checksum) {
+        console.log('📊 Initial checksum:', statusData.checksum);
+        // Store in our ref
+        currentChecksumRef.current = statusData.checksum;
+      }
+      
+      // Check if we have seed text and the server returned empty text
+      if (seedText && (!data.text || data.text.trim() === '')) {
+        console.log('🌱 Seeding initial text from URL parameter');
+        
+        // Save the seed text to server
+        await fetch(`${API_BASE_URL}/share.php?id=${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: seedText }),
+        });
+        
+        // Set all our state variables to the seed text
+        setText(seedText);
+        setSavedText(seedText);
+        setServerText(seedText);
+        setLastServerText(seedText);
+        lastServerTextRef.current = seedText;
+        setHasChanges(false);
+        setLastSaved(new Date());
+        setStatus('saved');
+        
+        console.log('🌱 Text seeded successfully:', seedText.length, 'characters');
+      } 
+      else if (data.text !== undefined) {
         const initialText = data.text;
         
         console.log('📋 Initial text state:', {
@@ -132,8 +209,11 @@ function TextShareApp() {
         console.log('🔄 Initial lastServerText length:', initialText.length);
         console.log('🔄 Initial ref value length:', lastServerTextRef.current.length);
       }
+      
+      setIsInitialized(true);
     } catch (error) {
       console.error('Error loading initial text:', error);
+      setIsInitialized(true);
     }
   };
 
@@ -151,6 +231,16 @@ function TextShareApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: textToSave }),
       });
+      
+      // After saving, get the new checksum for this content
+      const statusResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&status=1`);
+      const statusData = await statusResponse.json();
+      
+      // Update our stored checksum
+      if (statusData.exists && statusData.checksum) {
+        currentChecksumRef.current = statusData.checksum;
+        console.log('📊 Updated checksum after save:', statusData.checksum);
+      }
       
       // Update all state variables to match the saved text
       setStatus('saved');
@@ -188,46 +278,68 @@ function TextShareApp() {
         
         // Add timestamp to URL to prevent caching issues
         const cacheBreaker = new Date().getTime();
-        const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&t=${cacheBreaker}`);
-        const data = await response.json();
         
-        if (data.text !== undefined) {
-          const newServerText = data.text;
-          
-          // Compare with our ref value
-          const hasChanged = newServerText !== lastServerTextRef.current;
-          
-          // We need to get the current text value directly rather than from closure
-          // to avoid re-creating the effect on every keystroke
-          const currentText = text; // Get current text from state
-          const isDifferentFromEditor = newServerText !== currentText;
-          
-          console.log('🔍 Server check comparison:', { 
-            newServerLength: newServerText.length,
-            refLastServerLength: lastServerTextRef.current.length,
-            reactStateLastServerLength: lastServerText.length, 
-            currentTextLength: currentText.length,
-            hasChanged,
-            isDifferentFromEditor
+        // First, only fetch the status (lightweight request)
+        const statusResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&status=1&t=${cacheBreaker}`);
+        const statusData = await statusResponse.json();
+        
+        // Update the last checked time
+        setLastChecked(new Date());
+        setContentChecked(true);
+        
+        // Initialize currentChecksumRef on first poll if needed
+        if (!currentChecksumRef.current) {
+          console.log('� No current checksum available yet');
+        }
+        
+        if (statusData.exists) {
+          console.log('🔍 Status check:', { 
+            modified: new Date(statusData.modified * 1000).toLocaleString(),
+            checksum: statusData.checksum,
+            size: statusData.size,
+            currentChecksum: currentChecksumRef.current
           });
           
-          // Store the server response in React state
-          setServerText(newServerText);
+          // Check if content has changed by comparing checksums
+          const hasChanged = currentChecksumRef.current !== statusData.checksum;
           
-          if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
-            console.log('⭐ New updates available!');
-            setUpdatesAvailable(true);
+          if (hasChanged) {
+            console.log('🔄 Content changed, fetching new content...');
+            
+            // Only fetch the full content if the status check indicates changes
+            const contentResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&t=${cacheBreaker}`);
+            const contentData = await contentResponse.json();
+            
+            if (contentData.text !== undefined) {
+              const newServerText = contentData.text;
+              
+              // Update the checksum reference
+              currentChecksumRef.current = statusData.checksum;
+              
+              // We need to get the current text value directly rather than from closure
+              const currentText = text; // Get current text from state
+              const isDifferentFromEditor = newServerText !== currentText;
+              
+              // Store the server response in React state
+              setServerText(newServerText);
+              
+              if (isDifferentFromEditor && newServerText.trim() !== '') {
+                console.log('⭐ New updates available!');
+                setUpdatesAvailable(true);
+              } else {
+                setUpdatesAvailable(false);
+              }
+              
+              // Update our stable reference AND the React state
+              lastServerTextRef.current = newServerText;
+              setLastServerText(newServerText);
+              
+              console.log('✅ Updated ref to:', lastServerTextRef.current.length, 'characters');
+            }
           } else {
+            console.log('✓ No content changes detected');
             setUpdatesAvailable(false);
           }
-          
-          // Update our stable reference AND the React state
-          lastServerTextRef.current = newServerText;
-          setLastServerText(newServerText);
-          setLastChecked(new Date());
-          setContentChecked(true);
-          
-          console.log('✅ Updated ref to:', lastServerTextRef.current.length, 'characters');
         }
       } catch (error) {
         console.error('Error in stable check function:', error);
@@ -248,7 +360,51 @@ function TextShareApp() {
   };
 
   const getShareUrl = () => {
-    return window.location.href;
+    return window.location.origin + window.location.pathname + `#/share/${id}`;
+  };
+  
+  // Get a shareable URL with the current text as a seed
+  const getSeedUrl = () => {
+    // Only encode if there's text to share
+    if (text.trim()) {
+      const encodedText = encodeTextToBase64(text);
+      return window.location.origin + window.location.pathname + `#/share/${id}/seed/${encodedText}`;
+    }
+    
+    // If no text, return regular share URL
+    return getShareUrl();
+  };
+  
+  // Function to create a new session with the current text
+  const [newSessionId, setNewSessionId] = useState('');
+  const [creatingNewSession, setCreatingNewSession] = useState(false);
+  
+  const createNewSession = async () => {
+    if (!text.trim()) return; // Don't create empty sessions
+    
+    try {
+      setCreatingNewSession(true);
+      
+      // First, get a new ID
+      const idResponse = await fetch(`${API_BASE_URL}/share.php`);
+      const idData = await idResponse.json();
+      
+      if (idData.id) {
+        // Save the current text to the new ID
+        await fetch(`${API_BASE_URL}/share.php?id=${idData.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        
+        // Store the new ID for the UI
+        setNewSessionId(idData.id);
+      }
+    } catch (error) {
+      console.error('Error creating new session:', error);
+    } finally {
+      setCreatingNewSession(false);
+    }
   };
   
   // Manual check function for the "Check Updates" button
@@ -260,41 +416,68 @@ function TextShareApp() {
       
       // Add timestamp to URL to prevent caching issues
       const cacheBreaker = new Date().getTime();
-      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&t=${cacheBreaker}`);
-      const data = await response.json();
       
-      if (data.text !== undefined) {
-        const newServerText = data.text;
+      // First, fetch the status to check the checksum
+      const statusResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&status=1&t=${cacheBreaker}`);
+      const statusData = await statusResponse.json();
+      
+      // Get current checksum from our ref
+      const currentChecksum = currentChecksumRef.current || '';
+      
+      // Check if content has changed by comparing checksums
+      const hasChanged = currentChecksum !== statusData.checksum;
+      
+      console.log('📊 Manual check - checksums:', {
+        current: currentChecksum,
+        server: statusData.checksum,
+        hasChanged
+      });
+      
+      if (hasChanged) {
+        // Only fetch the full content if the status check indicates changes
+        const contentResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&t=${cacheBreaker}`);
+        const contentData = await contentResponse.json();
         
-        // Direct string comparison for determining changes
-        const hasChanged = newServerText !== lastServerTextRef.current; // Use ref for comparison
-        const isDifferentFromEditor = newServerText !== text;
-        
-        // Store the server response
-        setServerText(newServerText);
-        
-        console.log('Manual check results:', {
-          newTextLength: newServerText.length,
-          lastServerTextLength: lastServerText.length,
-          hasChanged,
-          isDifferentFromEditor
-        });
-        
-        if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
-          setUpdatesAvailable(true);
-          console.log('⭐ Manual check: Updates available');
-        } else {
-          setUpdatesAvailable(false);
-          console.log('✓ Manual check: No updates needed');
+        if (contentData.text !== undefined) {
+          const newServerText = contentData.text;
+          
+          // Update the stored checksum
+          currentChecksumRef.current = statusData.checksum;
+          
+          // Check if different from editor text
+          const isDifferentFromEditor = newServerText !== text;
+          
+          // Store the server response
+          setServerText(newServerText);
+          
+          console.log('Manual check results:', {
+            newTextLength: newServerText.length,
+            lastServerTextLength: lastServerText.length,
+            hasChanged,
+            isDifferentFromEditor
+          });
+          
+          if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
+            setUpdatesAvailable(true);
+            console.log('⭐ Manual check: Updates available');
+          } else {
+            setUpdatesAvailable(false);
+            console.log('✓ Manual check: No updates needed');
+          }
+          
+          // Update our state
+          setLastServerText(newServerText);
+          lastServerTextRef.current = newServerText; // Update ref too
+          setLastChecked(new Date());
+          setContentChecked(true);
+          
+          console.log('✅ Manual check: Updated ref to:', lastServerTextRef.current.length, 'characters');
         }
-        
-        // Update our state
-        setLastServerText(newServerText);
-        lastServerTextRef.current = newServerText; // Update ref too
+      } else {
+        console.log('✓ Manual check: No content changes detected (checksums match)');
+        setUpdatesAvailable(false);
         setLastChecked(new Date());
         setContentChecked(true);
-        
-        console.log('✅ Manual check: Updated ref to:', lastServerTextRef.current.length, 'characters');
       }
     } catch (error) {
       console.error('Error in manual check:', error);
@@ -303,38 +486,43 @@ function TextShareApp() {
 
   return (
     <div className="text-share-container">
-      <h1>Text Share</h1>
-      
-            {updatesAvailable ? (
-        <div className="updates-banner">
-          <span>New updates available!</span>
-          <button 
-            className="refresh-button"
-            onClick={applyUpdates}
-          >
-            Load Updates
-          </button>
-          {lastChecked && (
-            <span className="last-checked">
-              · Last checked: {lastChecked.toLocaleTimeString()}
-            </span>
-          )}
+      <div className="app-header">
+        <div className="app-title">
+          <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
+          <h1>Clippy</h1>
         </div>
-      ) : lastChecked && (
-        <div className="status-banner">
-          <span>
-            No new updates available
-            {import.meta.env.DEV && (
-              <small style={{ fontSize: '0.8em', marginLeft: '0.5em', opacity: 0.7 }}>
-                (Editor: {text.length} chars | Server: {serverText.length} chars)
-              </small>
+        
+        {updatesAvailable ? (
+          <div className="header-updates">
+            <span>New updates available!</span>
+            <button 
+              className="refresh-button"
+              onClick={applyUpdates}
+            >
+              <FontAwesomeIcon icon={faSync} className="button-icon" /> Load
+            </button>
+            {lastChecked && (
+              <span className="last-checked">
+                · {lastChecked.toLocaleTimeString()}
+              </span>
             )}
-            <span className="last-checked">
-              · Last checked: {lastChecked.toLocaleTimeString()}
+          </div>
+        ) : lastChecked && (
+          <div className="header-status">
+            <span>
+              No updates
+              {import.meta.env.DEV && (
+                <small style={{ fontSize: '0.8em', marginLeft: '0.5em', opacity: 0.7 }}>
+                  ({text.length}/{serverText.length})
+                </small>
+              )}
+              <span className="last-checked">
+                · {lastChecked.toLocaleTimeString()}
+              </span>
             </span>
-          </span>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
       
       <div className="text-area-container">
         <textarea 
@@ -352,7 +540,7 @@ function TextShareApp() {
             onClick={saveText}
             disabled={!hasChanges}
           >
-            Save Changes
+            <FontAwesomeIcon icon={faSave} className="button-icon" /> Save Changes
           </button>
           
           <button 
@@ -360,14 +548,14 @@ function TextShareApp() {
             onClick={manualCheckForUpdates}
             title="Check for updates now"
           >
-            Check Updates
+            <FontAwesomeIcon icon={faSync} className="button-icon" /> Check Updates
           </button>
           
           <button 
             className="share-toggle-button"
-            onClick={() => setShowShareOptions(prev => !prev)}
+            onClick={() => setShowShareModal(true)}
           >
-            {showShareOptions ? 'Hide Share' : 'Share'}
+            <FontAwesomeIcon icon={faShare} className="button-icon" /> Share
           </button>
         </div>
         
@@ -394,38 +582,139 @@ function TextShareApp() {
         </div>
       </div>
       
-      {showShareOptions && (
-        <div className="share-info">
-          <p>Share this URL with others to collaborate:</p>
-          <div className="share-container">
-            <div className="share-url">
-              <input
-                type="text"
-                readOnly
-                value={getShareUrl()}
-                onClick={(e) => e.target.select()}
-              />
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(getShareUrl());
-                  alert('URL copied to clipboard!');
-                }}
+      {/* Share Modal */}
+      {showShareModal && (
+        <div className="modal-overlay" onClick={() => setShowShareModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Share Options</h2>
+              <button 
+                className="modal-close" 
+                onClick={() => setShowShareModal(false)}
               >
-                Copy
+                ×
               </button>
             </div>
-            <div className="qr-code-container">
-              <div className="qr-code">
-                <QRCodeSVG value={getShareUrl()} size={128} />
+            <div className="share-info">
+              <div className="share-tabs">
+                <p>Share this URL with others to collaborate:</p>
+                <div className="share-container">
+                  <div className="share-url">
+                    <input
+                      type="text"
+                      readOnly
+                      value={getShareUrl()}
+                      onClick={(e) => e.target.select()}
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(getShareUrl());
+                        alert('URL copied to clipboard!');
+                      }}
+                    >
+                      <FontAwesomeIcon icon={faCopy} className="button-icon" /> Copy
+                    </button>
+                  </div>
+                  <div className="qr-code-container">
+                    <div className="qr-code">
+                      <QRCodeSVG value={getShareUrl()} size={128} />
+                    </div>
+                    <p className="qr-code-label">Scan with your phone</p>
+                  </div>
+                </div>
               </div>
-              <p className="qr-code-label">Scan with your phone</p>
+              
+              <div className="share-with-seed">
+                <p className="share-seed-heading">Share URL with current text pre-filled:</p>
+                <div className="share-url">
+                  <input
+                    type="text"
+                    readOnly
+                    value={getSeedUrl()}
+                    onClick={(e) => e.target.select()}
+                  />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(getSeedUrl());
+                      alert('Seed URL copied to clipboard!');
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faCopy} className="button-icon" /> Copy
+                  </button>
+                </div>
+                <p className="share-seed-description">
+                  This URL includes your current text in base64 encoded format. When someone opens it, the text will be pre-filled.
+                </p>
+              </div>
+              
+              <div className="share-new-session">
+                <p className="share-seed-heading">Create a new session with current text:</p>
+                {!newSessionId ? (
+                  <button 
+                    className="create-new-session-button"
+                    onClick={createNewSession}
+                    disabled={creatingNewSession || !text.trim()}
+                  >
+                    {creatingNewSession ? (
+                      <span>Creating...</span>
+                    ) : (
+                      <>
+                        <FontAwesomeIcon icon={faPlay} className="button-icon" /> 
+                        Create New Session
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <div className="new-session-created">
+                    <p>New session created! Share this URL:</p>
+                    <div className="share-url">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${window.location.origin}${window.location.pathname}#/share/${newSessionId}`}
+                        onClick={(e) => e.target.select()}
+                      />
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}#/share/${newSessionId}`);
+                          alert('New session URL copied to clipboard!');
+                        }}
+                      >
+                        <FontAwesomeIcon icon={faCopy} className="button-icon" /> Copy
+                      </button>
+                    </div>
+                    <div className="session-buttons">
+                      <a 
+                        href={`${window.location.origin}${window.location.pathname}#/share/${newSessionId}`}
+                        className="go-to-session-button"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <FontAwesomeIcon icon={faPlay} className="button-icon" /> 
+                        Open in New Tab
+                      </a>
+                      <button 
+                        className="reset-session-button"
+                        onClick={() => setNewSessionId('')}
+                      >
+                        Create Another
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <p className="share-seed-description">
+                  This creates a brand new sharing session containing the current text, separate from this one.
+                </p>
+              </div>
             </div>
           </div>
         </div>
       )}
       
       <div className="navigation">
-        <Link to="/" className="home-link">Return to Home</Link>
+        <Link to="/" className="home-link">
+          <FontAwesomeIcon icon={faHome} className="button-icon" /> Return to Home
+        </Link>
       </div>
     </div>
   );
@@ -459,7 +748,10 @@ function Home() {
 
   return (
     <div className="home-container">
-      <h1>Welcome to Clippy</h1>
+      <div className="app-header">
+        <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
+        <h1>Welcome to Clippy</h1>
+      </div>
       <p className="app-description">
         Share text between computers securely and easily
       </p>
@@ -469,7 +761,7 @@ function Home() {
       ) : (
         <div className="start-sharing">
           <Link to={`/share/${uniqueId}`} className="start-button">
-            Start New Sharing Session
+            <FontAwesomeIcon icon={faPlay} className="button-icon" /> Start New Sharing Session
           </Link>
         </div>
       )}
@@ -496,9 +788,14 @@ function ErrorPage() {
   
   return (
     <div className="error-container">
-      <h1>Oops!</h1>
+      <div className="app-header">
+        <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
+        <h1>Oops!</h1>
+      </div>
       <p>Sorry, an unexpected error has occurred.</p>
-      <Link to="/" className="home-link">Return to Home</Link>
+      <Link to="/" className="home-link">
+        <FontAwesomeIcon icon={faHome} className="button-icon" /> Return to Home
+      </Link>
       
       {shareId && (
         <div className="error-help">
@@ -529,6 +826,12 @@ const router = createHashRouter([
   },
   {
     path: '/share/:id',
+    element: <TextShareApp />,
+    errorElement: <ErrorPage />
+  },
+  {
+    // Route that handles a seed parameter in the URL hash
+    path: '/share/:id/seed/:seedData',
     element: <TextShareApp />,
     errorElement: <ErrorPage />
   }
