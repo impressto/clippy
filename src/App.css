@@ -88,7 +88,7 @@
 .home-container h1 {
   font-size: 1.5rem;
   color: var(--primary-color);
-  margin: 0 0 .5rem 0;
+  margin: 0;
 }
 
 .app-description {
@@ -250,7 +250,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   font-size: 0.9rem;
 }
 
@@ -418,32 +418,59 @@
   }
 }
 
+.share-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
 .share-url {
   display: flex;
-  flex: 1;
+  width: 100%;
 }
 
 .share-url input {
-  flex-grow: 1;
+  width: 100%;
   padding: 0.75rem;
   border: 1px solid var(--border-color);
-  border-radius: 8px 0 0 8px;
+  border-radius: 8px;
   font-size: 0.9rem;
 }
 
-.share-url button {
+/* Share action buttons container */
+.share-actions {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.share-action-button {
   background-color: var(--accent-color);
   color: white;
   border: none;
-  border-radius: 0 8px 8px 0;
-  padding: 0 1.5rem;
+  border-radius: 8px;
+  padding: 0.75rem 0;
+  font-weight: 600;
   cursor: pointer;
-  font-weight: bold;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s, transform 0.1s;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  max-width: calc(50% - 0.5rem);
 }
 
-.share-url button:hover {
+.share-action-button:hover {
   background-color: var(--primary-color);
+  transform: translateY(-2px);
+}
+
+.share-action-button:active {
+  transform: translateY(0);
 }
 
 .qr-code-container {
@@ -473,7 +500,7 @@
 }
 
 .navigation {
-  margin-top: 2rem;
+  margin-top: 0;
   text-align: center;
 }
 
@@ -582,6 +609,7 @@
   font-weight: bold;
   margin-bottom: 1rem;
   color: var(--primary-color);
+  text-align: center;
 }
 
 .share-seed-description {
@@ -595,6 +623,9 @@
   margin-top: 2rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .create-new-session-button {
@@ -684,22 +715,54 @@
   
   .share-textarea {
     height: 50vh;
+    background-color: #ffffff; /* Force white background on mobile */
+    color: #000000; /* Force black text color */
+    border: 1px solid #ccc;    /* Add a visible border */
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1); /* Add subtle inner shadow for depth */
+  }
+  
+  .controls-bar {
+    flex-direction: column-reverse;
+    gap: 0.75rem;
+    align-items: flex-start;
   }
   
   .button-group {
     flex-wrap: wrap;
+    width: 100%;
+  }
+  
+  .status {
+    margin-left: 0;
+    width: 100%;
+    padding: 0.5rem 0;
+    font-size: 0.85rem;
+    order: -1;
   }
   
   .app-header {
     margin-bottom: 1rem;
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
   }
   
-  .header-status,
+  .app-title {
+    flex: 1;
+  }
+  
   .header-updates {
     margin-top: 0.5rem;
     width: 100%;
+  }
+  
+  /* Keep the "No updates" status inline on the header row */
+  .header-status {
+    margin-top: 0;
+    margin-left: auto;
+    font-size: 0.75rem;
+    padding: 0.3rem 0.5rem;
   }
   
   .share-toggle-button,
@@ -712,5 +775,16 @@
   .app-logo {
     height: 40px;
     margin-right: 10px;
+  }
+  
+  /* Fix for Android text color issues */
+  .home-container {
+    color: #000000 !important; /* Force black text for all content in home container */
+  }
+  
+  .app-info h2,
+  .app-info li,
+  .app-description {
+    color: #000000 !important; /* Ensure "How it works" text is black */
   }
 }

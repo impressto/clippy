@@ -10,7 +10,8 @@ import {
   faEyeSlash, 
   faCopy, 
   faPlay, 
-  faHome 
+  faHome,
+  faEnvelope
 } from '@fortawesome/free-solid-svg-icons';
 import './App.css';
 
@@ -363,6 +364,17 @@ function TextShareApp() {
     return window.location.origin + window.location.pathname + `#/share/${id}`;
   };
   
+  // Function to share via email
+  const shareViaEmail = () => {
+    const subject = encodeURIComponent('Clippy: Shared Text Session');
+    const body = encodeURIComponent(
+      `I've shared a text session with you using Clippy.\n\n` +
+      `Access it at: ${getShareUrl()}\n\n` +
+      `Simply open the link to view and collaborate on the shared text.`
+    );
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  };
+  
   // Get a shareable URL with the current text as a seed
   const getSeedUrl = () => {
     // Only encode if there's text to share
@@ -482,6 +494,20 @@ function TextShareApp() {
     } catch (error) {
       console.error('Error in manual check:', error);
     }
+  };
+
+  // Function to share new session via email
+  const shareNewSessionViaEmail = () => {
+    if (!newSessionId) return;
+    
+    const newSessionUrl = `${window.location.origin}${window.location.pathname}#/share/${newSessionId}`;
+    const subject = encodeURIComponent('Clippy: New Text Session');
+    const body = encodeURIComponent(
+      `I've created a new text session for you using Clippy.\n\n` +
+      `Access it at: ${newSessionUrl}\n\n` +
+      `Simply open the link to view and collaborate on the shared text.`
+    );
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
 
   return (
@@ -606,13 +632,23 @@ function TextShareApp() {
                       value={getShareUrl()}
                       onClick={(e) => e.target.select()}
                     />
+                  </div>
+                  <div className="share-actions">
                     <button
+                      className="share-action-button"
                       onClick={() => {
                         navigator.clipboard.writeText(getShareUrl());
                         alert('URL copied to clipboard!');
                       }}
                     >
-                      <FontAwesomeIcon icon={faCopy} className="button-icon" /> Copy
+                      <FontAwesomeIcon icon={faCopy} className="button-icon" /> Copy Link
+                    </button>
+                    <button
+                      className="share-action-button"
+                      onClick={shareViaEmail}
+                      title="Share via Email"
+                    >
+                      <FontAwesomeIcon icon={faEnvelope} className="button-icon" /> Share via Email
                     </button>
                   </div>
                   <div className="qr-code-container">
@@ -622,29 +658,6 @@ function TextShareApp() {
                     <p className="qr-code-label">Scan with your phone</p>
                   </div>
                 </div>
-              </div>
-              
-              <div className="share-with-seed">
-                <p className="share-seed-heading">Share URL with current text pre-filled:</p>
-                <div className="share-url">
-                  <input
-                    type="text"
-                    readOnly
-                    value={getSeedUrl()}
-                    onClick={(e) => e.target.select()}
-                  />
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(getSeedUrl());
-                      alert('Seed URL copied to clipboard!');
-                    }}
-                  >
-                    <FontAwesomeIcon icon={faCopy} className="button-icon" /> Copy
-                  </button>
-                </div>
-                <p className="share-seed-description">
-                  This URL includes your current text in base64 encoded format. When someone opens it, the text will be pre-filled.
-                </p>
               </div>
               
               <div className="share-new-session">
@@ -667,21 +680,33 @@ function TextShareApp() {
                 ) : (
                   <div className="new-session-created">
                     <p>New session created! Share this URL:</p>
-                    <div className="share-url">
-                      <input
-                        type="text"
-                        readOnly
-                        value={`${window.location.origin}${window.location.pathname}#/share/${newSessionId}`}
-                        onClick={(e) => e.target.select()}
-                      />
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}#/share/${newSessionId}`);
-                          alert('New session URL copied to clipboard!');
-                        }}
-                      >
-                        <FontAwesomeIcon icon={faCopy} className="button-icon" /> Copy
-                      </button>
+                    <div className="share-container">
+                      <div className="share-url">
+                        <input
+                          type="text"
+                          readOnly
+                          value={`${window.location.origin}${window.location.pathname}#/share/${newSessionId}`}
+                          onClick={(e) => e.target.select()}
+                        />
+                      </div>
+                      <div className="share-actions">
+                        <button
+                          className="share-action-button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}#/share/${newSessionId}`);
+                            alert('New session URL copied to clipboard!');
+                          }}
+                        >
+                          <FontAwesomeIcon icon={faCopy} className="button-icon" /> Copy Link
+                        </button>
+                        <button
+                          className="share-action-button"
+                          onClick={shareNewSessionViaEmail}
+                          title="Share via Email"
+                        >
+                          <FontAwesomeIcon icon={faEnvelope} className="button-icon" /> Share via Email
+                        </button>
+                      </div>
                     </div>
                     <div className="session-buttons">
                       <a 

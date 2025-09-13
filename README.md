@@ -12,6 +12,29 @@ Clippy is a simple, secure text sharing application that allows users on differe
 - Status indicators showing save status and last update checks
 - Clean, responsive user interface
 
+## Advanced Usage
+
+### Pre-populating Content
+
+You can initialize a Clippy session with pre-set text by using a specially formatted URL:
+
+```
+https://impressto.ca/clippy/#/share/{sessionId}/seed/{base64EncodedText}
+```
+
+For example:
+```
+https://impressto.ca/clippy/#/share/f88b0a88d57a92cb/seed/b2slMjB0aGVu
+```
+
+In this URL structure:
+- `{sessionId}` is the unique identifier for the sharing session (e.g., `f88b0a88d57a92cb`)
+- `{base64EncodedText}` is your text content encoded in base64 format (e.g., `b2slMjB0aGVu`)
+
+This feature is useful for sharing templates or starter content with other users, or for bookmarking frequently used text snippets.
+
+
+
 ## Technology Stack
 
 - **Frontend**: React 19 with React Router 7
