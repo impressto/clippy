@@ -35,6 +35,7 @@ if (basename($_SERVER['SCRIPT_NAME']) == 'index.php' && isset($_GET['share'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="<?php echo $basePath; ?>/" />
     <title>Clippy - Secure Text Sharing</title>
+  <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/png" href="https://impressto.ca/images/clippy.png" />
     <script type="module" crossorigin src="<?php echo $assetsUrl; ?>/assets/index.js"></script>
     <link rel="stylesheet" href="<?php echo $assetsUrl; ?>/assets/index.css">
