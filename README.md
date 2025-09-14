@@ -2,6 +2,8 @@
 
 Clippy is a simple, secure text sharing application that allows users on different computers to share and collaborate on text in real-time. When a user creates a new session, a unique ID is generated to securely identify the shared text file on the server.
 
+<img width="511" height="501" alt="clippy" src="https://github.com/user-attachments/assets/86719d49-84c4-445f-ad4d-2f920ce9c557" />
+
 ## Features
 
 - Create secure sharing sessions with unique identifiers
