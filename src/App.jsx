@@ -14,6 +14,8 @@ import {
   faEnvelope
 } from '@fortawesome/free-solid-svg-icons';
 import './App.css';
+import ThemeToggle from './components/ThemeToggle.jsx';
+import { useTheme } from './theme/ThemeContext.jsx';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 const LOGO_URL = import.meta.env.VITE_LOGO_URL || '/clippy.png';
@@ -58,6 +60,8 @@ function TextShareApp() {
   const [showShareOptions, setShowShareOptions] = useState(false); // Hide share options by default
   const [showShareModal, setShowShareModal] = useState(false); // For the share modal
   const [isInitialized, setIsInitialized] = useState(false); // Track if we've initialized with seed text
+  // Remove local theme state in favor of context
+  const { isDark } = useTheme();
   
   // Use a ref to store the lastServerText that persists across renders
   // This will be shared between all our functions
@@ -516,6 +520,7 @@ function TextShareApp() {
         <div className="app-title">
           <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
           <h1>Clippy</h1>
+          <ThemeToggle />
         </div>
         
         {updatesAvailable ? (
@@ -557,6 +562,21 @@ function TextShareApp() {
           className="share-textarea"
           placeholder="Start typing here..."
         />
+        <button 
+          className="copy-textarea-button" 
+          onClick={() => {
+            navigator.clipboard.writeText(text);
+            // Use a more subtle notification instead of an alert
+            const originalTitle = document.title;
+            document.title = "✓ Copied!";
+            setTimeout(() => {
+              document.title = originalTitle;
+            }, 1500);
+          }}
+          title="Copy text to clipboard"
+        >
+          <FontAwesomeIcon icon={faCopy} />
+        </button>
       </div>
       
       <div className="controls-bar">
@@ -750,6 +770,7 @@ function Home() {
   const [uniqueId, setUniqueId] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
+  const { isDark } = useTheme();
 
   // Generate a unique ID for a new sharing session
   useEffect(() => {
@@ -774,8 +795,11 @@ function Home() {
   return (
     <div className="home-container">
       <div className="app-header">
-        <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
-        <h1>Welcome to Clippy</h1>
+        <div className="app-title">
+          <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
+          <h1>Welcome to Clippy</h1>
+          <ThemeToggle />
+        </div>
       </div>
       <p className="app-description">
         Share text between computers securely and easily
@@ -810,12 +834,15 @@ function ErrorPage() {
   const location = window.location;
   const path = location.hash.substring(1); // Remove the # character
   const shareId = path.match(/\/share\/([^\/]+)/)?.[1]; // Extract ID from path if it exists
-  
+
   return (
     <div className="error-container">
       <div className="app-header">
-        <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
-        <h1>Oops!</h1>
+        <div className="app-title">
+          <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
+          <h1>Oops!</h1>
+          <ThemeToggle />
+        </div>
       </div>
       <p>Sorry, an unexpected error has occurred.</p>
       <Link to="/" className="home-link">

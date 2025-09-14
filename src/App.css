@@ -8,6 +8,22 @@
   --success-color: #2a9d8f;
   --error-color: #e63946;
   --warning-color: #ffb703;
+  --textarea-bg: #ffffff;
+  --textarea-text: #212529;
+}
+
+:root.dark-theme {
+  --primary-color: #5b7fff;
+  --secondary-color: #6c63ff;
+  --accent-color: #58a6ff;
+  --background-color: #1a1a1a;
+  --text-color: #e0e0e0;
+  --border-color: #444444;
+  --success-color: #2dd4bf;
+  --error-color: #f87171;
+  --warning-color: #fbbf24;
+  --textarea-bg: #2d2d2d;
+  --textarea-text: #e0e0e0;
 }
 
 #root {
@@ -15,6 +31,14 @@
   margin: 0 auto;
   padding: 0;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+
+body {
+  transition: background-color 0.3s ease;
+}
+
+body.dark-theme {
+  background-color: #121212;
 }
 
 .app-header {
@@ -47,6 +71,12 @@
   align-items: center;
 }
 
+.dark-theme .header-status {
+  color: #c8e6ff;
+  background-color: #1e2a3a;
+  border-color: #2a3c54;
+}
+
 .header-updates {
   font-size: 0.85rem;
   color: #856404;
@@ -57,6 +87,12 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.dark-theme .header-updates {
+  color: #ffe8a3;
+  background-color: #3a3000;
+  border-color: #665800;
 }
 
 .button-icon {
@@ -70,6 +106,35 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   padding: 1rem;
   box-sizing: border-box;
+  color: var(--text-color);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Theme Toggle */
+.theme-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-color);
+  font-size: 1.2rem;
+  margin-left: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 50%;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.theme-toggle:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+  transform: scale(1.1);
+}
+
+.dark-theme .theme-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* Home Page Styles */
@@ -159,6 +224,7 @@
 .text-area-container {
   width: 100%;
   margin-bottom: 1rem;
+  position: relative;
 }
 
 .share-textarea {
@@ -172,7 +238,39 @@
   box-sizing: border-box;
   font-family: inherit;
   line-height: 1.5;
-  transition: height 0.3s ease;
+  transition: all 0.3s ease;
+  background-color: var(--textarea-bg);
+  color: var(--textarea-text);
+}
+
+.copy-textarea-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: color 0.2s, transform 0.1s;
+  color: var(--border-color);
+  font-size: 1.1rem;
+  opacity: 0.7;
+}
+
+.copy-textarea-button:hover {
+  color: var(--primary-color);
+  transform: scale(1.1);
+  opacity: 1;
+}
+
+.copy-textarea-button:active {
+  transform: translateY(0);
 }
 
 .share-textarea:focus {
@@ -437,6 +535,19 @@
   border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 0.9rem;
+  background-color: var(--textarea-bg);
+  color: var(--textarea-text);
+}
+
+/* Placeholder colors */
+input::placeholder,
+textarea::placeholder {
+  color: #9aa0a6;
+}
+
+.dark-theme input::placeholder,
+.dark-theme textarea::placeholder {
+  color: #9aa0a6;
 }
 
 /* Share action buttons container */
@@ -552,6 +663,13 @@
   max-height: 90vh;
   overflow-y: auto;
   animation: zoomIn 0.3s ease-out;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dark-theme .modal-content {
+  background-color: #2d2d2d;
+  color: var(--text-color);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 
 @keyframes zoomIn {
@@ -597,6 +715,10 @@
   padding: 1.5rem;
   box-shadow: none;
   border: none;
+}
+
+.dark-theme .modal-content .share-info {
+  background-color: #2d2d2d;
 }
 
 .share-with-seed {
@@ -660,6 +782,11 @@
   border-radius: 8px;
   margin: 1rem 0;
   border: 1px solid #cce5ff;
+}
+
+.dark-theme .new-session-created {
+  background-color: #1f2a33;
+  border-color: #2a3c54;
 }
 
 .new-session-created p {
