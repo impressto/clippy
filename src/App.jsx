@@ -82,8 +82,7 @@ function TextShareApp() {
   // It's still used for manual "Check Updates" button clicks
   const checkForUpdates = async () => {
     try {
-      console.log('🔍 Manual check initiated');
-      console.log('📊 Before manual check - lastServerText state:', lastServerText.length);
+      
       
       // Add timestamp to URL to prevent caching issues
       const cacheBreaker = new Date().getTime();
@@ -101,31 +100,20 @@ function TextShareApp() {
         setServerText(newServerText);
         
         // Debug information to help diagnose comparison issues
-        console.log('Manual update check:', { 
-          newTextLength: newServerText.length,
-          lastServerTextLength: lastServerText.length,
-          editorTextLength: text.length,
-          hasChanged,
-          isDifferentFromEditor,
-          newTextStart: newServerText.substring(0, 30),
-          lastServerTextStart: lastServerText.substring(0, 30)
-        });
+        
         
         // ONLY show updates when:
         // 1. The text from server is different from our last known server state AND
         // 2. It's different from what's currently in the editor AND
         // 3. It's not empty
         if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
-          console.log('⭐ New updates detected - showing update button');
           setUpdatesAvailable(true);
         } else {
-          console.log('✓ No meaningful changes - hiding update button');
           setUpdatesAvailable(false);
         }
         
         // Important: Always update our record of the last server text after each check
         setLastServerText(newServerText);
-        console.log('📝 Updated lastServerText to:', newServerText.length, 'characters');
         setLastChecked(new Date());
         setContentChecked(true);
         setContentChecked(true);
@@ -149,14 +137,13 @@ function TextShareApp() {
     setUpdatesAvailable(false);
     setStatus('updated');
     
-    console.log('✅ Updates applied - text synchronized with server');
-    console.log('🔄 Updated ref after applying updates:', serverText.length, 'characters');
+    
   };
 
   // Initial load of text from server
   const initialLoad = async () => {
     try {
-      console.log('📥 Starting initial load...');
+      
       
       // First, fetch the text content
       const response = await fetch(`${API_BASE_URL}/share.php?id=${id}`);
@@ -168,14 +155,14 @@ function TextShareApp() {
       
       // Update checksum reference if available
       if (statusData.exists && statusData.checksum) {
-        console.log('📊 Initial checksum:', statusData.checksum);
+        
         // Store in our ref
         currentChecksumRef.current = statusData.checksum;
       }
       
       // Check if we have seed text and the server returned empty text
       if (seedText && (!data.text || data.text.trim() === '')) {
-        console.log('🌱 Seeding initial text from URL parameter');
+        
         
         // Save the seed text to server
         await fetch(`${API_BASE_URL}/share.php?id=${id}`, {
@@ -194,15 +181,12 @@ function TextShareApp() {
         setLastSaved(new Date());
         setStatus('saved');
         
-        console.log('🌱 Text seeded successfully:', seedText.length, 'characters');
+        
       } 
       else if (data.text !== undefined) {
         const initialText = data.text;
         
-        console.log('📋 Initial text state:', {
-          initialTextLength: initialText.length,
-          initialTextStart: initialText.substring(0, 30)
-        });
+        
         
         setText(initialText);
         setSavedText(initialText);
@@ -211,9 +195,7 @@ function TextShareApp() {
         lastServerTextRef.current = initialText; // Also store in our ref
         setHasChanges(false);
         
-        console.log('🚀 Initial text loaded from server');
-        console.log('🔄 Initial lastServerText length:', initialText.length);
-        console.log('🔄 Initial ref value length:', lastServerTextRef.current.length);
+        
       }
       
       setIsInitialized(true);
@@ -245,7 +227,7 @@ function TextShareApp() {
       // Update our stored checksum
       if (statusData.exists && statusData.checksum) {
         currentChecksumRef.current = statusData.checksum;
-        console.log('📊 Updated checksum after save:', statusData.checksum);
+        
       }
       
       // Update all state variables to match the saved text
@@ -258,9 +240,7 @@ function TextShareApp() {
       setHasChanges(false);
       setUpdatesAvailable(false);
       
-      console.log('💾 Saved and updated ref to:', textToSave.length, 'characters');
       
-      console.log('💾 Text saved to server and state synchronized');
     } catch (error) {
       console.error('Error saving text:', error);
       setStatus('error');
@@ -271,7 +251,7 @@ function TextShareApp() {
   useEffect(() => {
     if (!id) return;
     
-    console.log('🔄 Setting up component with ID:', id);
+    
     
     // Initial load
     initialLoad();
@@ -279,8 +259,7 @@ function TextShareApp() {
     // Define a wrapped check function that uses our ref for stable state between calls
     const stableCheckFunction = async () => {
       try {
-        console.log('📊 Before check - lastServerText state variable:', lastServerText.length);
-        console.log('📊 Before check - ref variable:', lastServerTextRef.current.length);
+        
         
         // Add timestamp to URL to prevent caching issues
         const cacheBreaker = new Date().getTime();
@@ -295,22 +274,17 @@ function TextShareApp() {
         
         // Initialize currentChecksumRef on first poll if needed
         if (!currentChecksumRef.current) {
-          console.log('� No current checksum available yet');
+          
         }
         
         if (statusData.exists) {
-          console.log('🔍 Status check:', { 
-            modified: new Date(statusData.modified * 1000).toLocaleString(),
-            checksum: statusData.checksum,
-            size: statusData.size,
-            currentChecksum: currentChecksumRef.current
-          });
+          
           
           // Check if content has changed by comparing checksums
           const hasChanged = currentChecksumRef.current !== statusData.checksum;
           
           if (hasChanged) {
-            console.log('🔄 Content changed, fetching new content...');
+            
             
             // Only fetch the full content if the status check indicates changes
             const contentResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&t=${cacheBreaker}`);
@@ -330,7 +304,7 @@ function TextShareApp() {
               setServerText(newServerText);
               
               if (isDifferentFromEditor && newServerText.trim() !== '') {
-                console.log('⭐ New updates available!');
+                
                 setUpdatesAvailable(true);
               } else {
                 setUpdatesAvailable(false);
@@ -340,10 +314,10 @@ function TextShareApp() {
               lastServerTextRef.current = newServerText;
               setLastServerText(newServerText);
               
-              console.log('✅ Updated ref to:', lastServerTextRef.current.length, 'characters');
+              
             }
           } else {
-            console.log('✓ No content changes detected');
+            
             setUpdatesAvailable(false);
           }
         }
@@ -427,9 +401,7 @@ function TextShareApp() {
   // Manual check function for the "Check Updates" button
   const manualCheckForUpdates = async () => {
     try {
-      console.log('🔍 Manual check initiated');
-      console.log('📊 Before manual check - lastServerText length:', lastServerText.length);
-      console.log('📊 Before manual check - ref length:', lastServerTextRef.current.length);
+      
       
       // Add timestamp to URL to prevent caching issues
       const cacheBreaker = new Date().getTime();
@@ -444,11 +416,7 @@ function TextShareApp() {
       // Check if content has changed by comparing checksums
       const hasChanged = currentChecksum !== statusData.checksum;
       
-      console.log('📊 Manual check - checksums:', {
-        current: currentChecksum,
-        server: statusData.checksum,
-        hasChanged
-      });
+      
       
       if (hasChanged) {
         // Only fetch the full content if the status check indicates changes
@@ -467,19 +435,12 @@ function TextShareApp() {
           // Store the server response
           setServerText(newServerText);
           
-          console.log('Manual check results:', {
-            newTextLength: newServerText.length,
-            lastServerTextLength: lastServerText.length,
-            hasChanged,
-            isDifferentFromEditor
-          });
+          
           
           if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
             setUpdatesAvailable(true);
-            console.log('⭐ Manual check: Updates available');
           } else {
             setUpdatesAvailable(false);
-            console.log('✓ Manual check: No updates needed');
           }
           
           // Update our state
@@ -488,10 +449,10 @@ function TextShareApp() {
           setLastChecked(new Date());
           setContentChecked(true);
           
-          console.log('✅ Manual check: Updated ref to:', lastServerTextRef.current.length, 'characters');
+          
         }
       } else {
-        console.log('✓ Manual check: No content changes detected (checksums match)');
+        
         setUpdatesAvailable(false);
         setLastChecked(new Date());
         setContentChecked(true);
