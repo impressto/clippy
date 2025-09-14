@@ -635,6 +635,25 @@ textarea::placeholder {
   text-decoration: underline;
 }
 
+/* Footer */
+.app-footer {
+  margin: 2rem 0 0;
+  padding: 1rem 0;
+  text-align: center;
+  color: var(--text-color);
+  border-top: 1px solid var(--border-color);
+  font-size: 0.9rem;
+}
+
+.app-footer a {
+  color: var(--primary-color);
+  text-decoration: none;
+}
+
+.app-footer a:hover {
+  text-decoration: underline;
+}
+
 /* Error Page */
 .error-container {
   text-align: center;

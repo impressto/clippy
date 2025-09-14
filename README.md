@@ -1,4 +1,4 @@
-# Clippy - Secure Text Sharing App
+# Clippy - Text Sharing App
 
 Clippy is a simple, secure text sharing application that allows users on different computers to share and collaborate on text in real-time. When a user creates a new session, a unique ID is generated to securely identify the shared text file on the server.
 

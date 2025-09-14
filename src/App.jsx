@@ -16,6 +16,7 @@ import {
 import './App.css';
 import ThemeToggle from './components/ThemeToggle.jsx';
 import { useTheme } from './theme/ThemeContext.jsx';
+import Footer from './components/Footer.jsx';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 const LOGO_URL = import.meta.env.VITE_LOGO_URL || '/clippy.png';
@@ -761,6 +762,7 @@ function TextShareApp() {
           <FontAwesomeIcon icon={faHome} className="button-icon" /> Return to Home
         </Link>
       </div>
+  <Footer />
     </div>
   );
 }
@@ -825,6 +827,7 @@ function Home() {
           <li>Choose when to apply updates so your typing won't be interrupted</li>
         </ul>
       </div>
+  <Footer />
     </div>
   );
 }
@@ -865,6 +868,7 @@ function ErrorPage() {
           If you're trying to access a shared document, make sure the URL is in the correct format.
         </p>
       )}
+  <Footer />
     </div>
   );
 }
