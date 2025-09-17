@@ -11,7 +11,8 @@ import {
   faCopy, 
   faPlay, 
   faHome,
-  faEnvelope
+  faEnvelope,
+  faUsers
 } from '@fortawesome/free-solid-svg-icons';
 import './App.css';
 import ThemeToggle from './components/ThemeToggle.jsx';
@@ -73,6 +74,9 @@ function TextShareApp() {
   });
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  // Active users tracking
+  const [activeUsers, setActiveUsers] = useState(1); // Start with yourself
+  const clientIdRef = useRef(null);
   // Remove local theme state in favor of context
   const { isDark } = useTheme();
   
@@ -465,10 +469,88 @@ function TextShareApp() {
     };
     
     // Set up polling with our wrapped function
-    const interval = setInterval(stableCheckFunction, 10000);
+    const interval = setInterval(() => {
+      stableCheckFunction();
+      
+      // Also ping for active users if we have an ID
+      if (id && clientIdRef.current) {
+        pingActiveUsers();
+      }
+    }, 10000);
     
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      
+      // Leave the session when unmounting the component
+      if (id && clientIdRef.current) {
+        leaveSession();
+      }
+    };
   }, [id, autoUpdate]); // Include autoUpdate in deps to respond to changes
+  
+  // Function to generate a client ID on mount
+  useEffect(() => {
+    // Generate a unique client ID if we don't have one yet
+    if (!clientIdRef.current) {
+      clientIdRef.current = `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    }
+    
+    // Ping for active users immediately on mount if we have an ID
+    if (id) {
+      pingActiveUsers();
+    }
+    
+    // Set up beforeunload event to leave the session when the user closes the tab
+    const handleBeforeUnload = () => {
+      if (id && clientIdRef.current) {
+        leaveSession();
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [id]);
+  
+  // Function to ping the server for active users
+  const pingActiveUsers = async () => {
+    if (!id || !clientIdRef.current) return;
+    
+    try {
+      const headers = new Headers();
+      headers.append('X-Client-ID', clientIdRef.current);
+      
+      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=ping`, {
+        headers
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success' && data.activeUsers !== undefined) {
+        setActiveUsers(data.activeUsers);
+      }
+    } catch (error) {
+      console.error('Error pinging for active users:', error);
+    }
+  };
+  
+  // Function to leave the session
+  const leaveSession = async () => {
+    if (!id || !clientIdRef.current) return;
+    
+    try {
+      const headers = new Headers();
+      headers.append('X-Client-ID', clientIdRef.current);
+      
+      await fetch(`${API_BASE_URL}/share.php?id=${id}&track=leave`, {
+        headers
+      });
+    } catch (error) {
+      console.error('Error leaving session:', error);
+    }
+  };
 
   const handleTextChange = (e) => {
     const newText = e.target.value;
@@ -701,6 +783,9 @@ function TextShareApp() {
                   · {lastChecked.toLocaleTimeString()}
                 </span>
               )}
+              <span className="active-users" title="Active users in this session">
+                · <FontAwesomeIcon icon={faUsers} /> {activeUsers}
+              </span>
             </div>
           ) : lastChecked && (
             <div className="header-status">
@@ -713,6 +798,9 @@ function TextShareApp() {
                 )}
                 <span className="last-checked">
                   · {lastChecked.toLocaleTimeString()}
+                </span>
+                <span className="active-users" title="Active users in this session">
+                  · <FontAwesomeIcon icon={faUsers} /> {activeUsers}
                 </span>
               </span>
             </div>

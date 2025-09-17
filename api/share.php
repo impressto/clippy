@@ -14,6 +14,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 // Directory to store shared text files
 $dataDir = __DIR__ . '/../data';
+// Session activity tracking file
+$sessionTrackingFile = $dataDir . '/active_sessions.json';
+
 try {
     // Create data directory if it doesn't exist
     if (!file_exists($dataDir)) {
@@ -36,6 +39,86 @@ try {
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['id'])) {
     $uniqueId = bin2hex(random_bytes(8)); // Using 8 bytes for stronger security
     echo json_encode(['id' => $uniqueId]);
+    exit;
+}
+
+// Function to track active sessions
+function trackSession($sessionId, $action = 'ping') {
+    global $sessionTrackingFile;
+    
+    // Generate a unique client ID if not provided
+    $clientId = isset($_SERVER['HTTP_X_CLIENT_ID']) ? $_SERVER['HTTP_X_CLIENT_ID'] : uniqid();
+    
+    $sessions = [];
+    if (file_exists($sessionTrackingFile)) {
+        $data = file_get_contents($sessionTrackingFile);
+        if ($data) {
+            $sessions = json_decode($data, true) ?: [];
+        }
+    }
+    
+    // Current timestamp
+    $now = time();
+    
+    // Clean up expired sessions (older than 30 seconds)
+    foreach ($sessions as $id => $sessionData) {
+        foreach ($sessionData['clients'] as $cId => $lastSeen) {
+            if ($now - $lastSeen > 30) {
+                unset($sessions[$id]['clients'][$cId]);
+            }
+        }
+        
+        // If no clients left, remove the session
+        if (empty($sessions[$id]['clients'])) {
+            unset($sessions[$id]);
+        }
+    }
+    
+    // For 'ping' action, update the session
+    if ($action === 'ping') {
+        if (!isset($sessions[$sessionId])) {
+            $sessions[$sessionId] = [
+                'clients' => [],
+                'created' => $now
+            ];
+        }
+        
+        // Update this client's timestamp
+        $sessions[$sessionId]['clients'][$clientId] = $now;
+    } elseif ($action === 'leave' && isset($sessions[$sessionId]['clients'][$clientId])) {
+        // For 'leave' action, remove the client
+        unset($sessions[$sessionId]['clients'][$clientId]);
+        
+        // If no clients left, remove the session
+        if (empty($sessions[$sessionId]['clients'])) {
+            unset($sessions[$sessionId]);
+        }
+    }
+    
+    // Save updated session data
+    file_put_contents($sessionTrackingFile, json_encode($sessions));
+    
+    // Return the number of active clients for this session
+    return isset($sessions[$sessionId]) ? count($sessions[$sessionId]['clients']) : 0;
+}
+
+// Handle active user tracking endpoint
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['id']) && isset($_GET['track'])) {
+    $id = $_GET['id'];
+    
+    // Validate ID format to prevent directory traversal
+    if (!preg_match('/^[a-f0-9]+$/', $id)) {
+        echo json_encode(['error' => 'Invalid ID format']);
+        exit;
+    }
+    
+    $action = $_GET['track'] === 'leave' ? 'leave' : 'ping';
+    $activeUsers = trackSession($id, $action);
+    
+    echo json_encode([
+        'status' => 'success',
+        'activeUsers' => $activeUsers
+    ]);
     exit;
 }
 

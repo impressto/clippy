@@ -99,6 +99,18 @@ body.dark-theme {
   border-color: #665800;
 }
 
+.active-users {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+
+.dark-theme .active-users {
+  color: #a8d1ff;
+}
+
 .button-icon {
   margin-right: 8px;
 }
