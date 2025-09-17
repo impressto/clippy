@@ -61,6 +61,17 @@ function TextShareApp() {
   const [showShareOptions, setShowShareOptions] = useState(false); // Hide share options by default
   const [showShareModal, setShowShareModal] = useState(false); // For the share modal
   const [isInitialized, setIsInitialized] = useState(false); // Track if we've initialized with seed text
+  const [hasDraft, setHasDraft] = useState(false); // Whether user has a saved draft
+  const [draftText, setDraftText] = useState(''); // Store the draft text
+  const [showDraft, setShowDraft] = useState(false); // Whether to show the draft or current text
+  const [autoUpdate, setAutoUpdate] = useState(() => {
+    try {
+      const saved = localStorage.getItem('clippy-auto-update');
+      return saved === 'true';
+    } catch { return false; }
+  });
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
   // Remove local theme state in favor of context
   const { isDark } = useTheme();
   
@@ -107,7 +118,16 @@ function TextShareApp() {
         // 2. It's different from what's currently in the editor AND
         // 3. It's not empty
         if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
-          setUpdatesAvailable(true);
+          if (autoUpdate) {
+            // When auto-updating, use the new text directly to avoid race conditions
+            setText(newServerText);
+            setSavedText(newServerText);
+            setLastServerText(newServerText);
+            lastServerTextRef.current = newServerText;
+            setStatus('updated');
+          } else {
+            setUpdatesAvailable(true);
+          }
         } else {
           setUpdatesAvailable(false);
         }
@@ -137,7 +157,70 @@ function TextShareApp() {
     setUpdatesAvailable(false);
     setStatus('updated');
     
+    // If we're viewing the draft, switch back to the shared text
+    if (showDraft) {
+      setShowDraft(false);
+    }
     
+    // Show toast notification for manual update
+    setToastMessage('Updates applied successfully');
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  // Save auto-update preference
+  useEffect(() => {
+    try {
+      localStorage.setItem('clippy-auto-update', autoUpdate ? 'true' : 'false');
+    } catch {}
+  }, [autoUpdate]);
+
+  // Check for saved draft on initial load
+  useEffect(() => {
+    if (!id) return;
+    try {
+      const savedDraft = localStorage.getItem(`clippy-draft-${id}`);
+      if (savedDraft) {
+        setDraftText(savedDraft);
+        setHasDraft(true);
+      }
+    } catch (error) {
+      console.error('Error loading draft from localStorage:', error);
+    }
+  }, [id]);
+
+  // Save current text as draft
+  const saveDraft = () => {
+    try {
+      localStorage.setItem(`clippy-draft-${id}`, text);
+      setDraftText(text);
+      setHasDraft(true);
+      setShowToast(true);
+      setToastMessage('Draft saved successfully');
+      setTimeout(() => setShowToast(false), 3000);
+    } catch (error) {
+      console.error('Error saving draft to localStorage:', error);
+    }
+  };
+
+  // Delete the saved draft
+  const deleteDraft = () => {
+    try {
+      localStorage.removeItem(`clippy-draft-${id}`);
+      setHasDraft(false);
+      setDraftText('');
+      setShowDraft(false);
+      setShowToast(true);
+      setToastMessage('Draft deleted');
+      setTimeout(() => setShowToast(false), 3000);
+    } catch (error) {
+      console.error('Error deleting draft from localStorage:', error);
+    }
+  };
+
+  // Toggle between draft and current text
+  const toggleDraft = () => {
+    setShowDraft(!showDraft);
   };
 
   // Initial load of text from server
@@ -304,8 +387,30 @@ function TextShareApp() {
               setServerText(newServerText);
               
               if (isDifferentFromEditor && newServerText.trim() !== '') {
-                
-                setUpdatesAvailable(true);
+                if (autoUpdate) {
+                  // When auto-updating, use the new text directly to avoid race conditions
+                  setText(newServerText);
+                  setSavedText(newServerText);
+                  setLastServerText(newServerText);
+                  lastServerTextRef.current = newServerText;
+                  setStatus('updated');
+                  
+                  // If user is viewing draft, don't switch views but still notify
+                  const switchedFromDraft = showDraft;
+                  if (showDraft) {
+                    setToastMessage('Text updated in shared view (you\'re viewing your draft)');
+                  } else {
+                    setToastMessage('Text updated automatically and copied to clipboard');
+                    // Copy the new content to clipboard only if not viewing draft
+                    navigator.clipboard.writeText(newServerText)
+                      .catch(err => console.error('Could not copy text to clipboard:', err));
+                  }
+                  
+                  setShowToast(true);
+                  setTimeout(() => setShowToast(false), 3000);
+                } else {
+                  setUpdatesAvailable(true);
+                }
               } else {
                 setUpdatesAvailable(false);
               }
@@ -330,13 +435,25 @@ function TextShareApp() {
     const interval = setInterval(stableCheckFunction, 10000);
     
     return () => clearInterval(interval);
-  }, [id]); // Only depend on id, not text
+  }, [id, autoUpdate]); // Include autoUpdate in deps to respond to changes
 
   const handleTextChange = (e) => {
     const newText = e.target.value;
-    setText(newText);
-    setHasChanges(newText !== savedText);
-    setStatus('unsaved');
+    
+    if (showDraft) {
+      // We're editing the draft
+      setDraftText(newText);
+      try {
+        localStorage.setItem(`clippy-draft-${id}`, newText);
+      } catch (error) {
+        console.error('Error auto-saving draft to localStorage:', error);
+      }
+    } else {
+      // We're editing the main text
+      setText(newText);
+      setHasChanges(newText !== savedText);
+      setStatus('unsaved');
+    }
   };
 
   const getShareUrl = () => {
@@ -438,7 +555,29 @@ function TextShareApp() {
           
           
           if (hasChanged && isDifferentFromEditor && newServerText.trim() !== '') {
-            setUpdatesAvailable(true);
+            if (autoUpdate) {
+              // When auto-updating, use the new text directly to avoid race conditions
+              setText(newServerText);
+              setSavedText(newServerText);
+              setLastServerText(newServerText);
+              lastServerTextRef.current = newServerText;
+              setStatus('updated');
+              
+              // If user is viewing draft, don't switch views but still notify
+              if (showDraft) {
+                setToastMessage('Text updated in shared view (you\'re viewing your draft)');
+              } else {
+                setToastMessage('Text updated automatically and copied to clipboard');
+                // Copy the new content to clipboard only if not viewing draft
+                navigator.clipboard.writeText(newServerText)
+                  .catch(err => console.error('Could not copy text to clipboard:', err));
+              }
+              
+              setShowToast(true);
+              setTimeout(() => setShowToast(false), 3000);
+            } else {
+              setUpdatesAvailable(true);
+            }
           } else {
             setUpdatesAvailable(false);
           }
@@ -478,6 +617,11 @@ function TextShareApp() {
 
   return (
     <div className="text-share-container">
+      {showToast && (
+        <div className="toast-notification">
+          {toastMessage}
+        </div>
+      )}
       <div className="app-header">
         <div className="app-title">
           <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
@@ -485,44 +629,102 @@ function TextShareApp() {
           <ThemeToggle />
         </div>
         
-        {updatesAvailable ? (
-          <div className="header-updates">
-            <span>New updates available!</span>
-            <button 
-              className="refresh-button"
-              onClick={applyUpdates}
-            >
-              <FontAwesomeIcon icon={faSync} className="button-icon" /> Load
-            </button>
-            {lastChecked && (
-              <span className="last-checked">
-                · {lastChecked.toLocaleTimeString()}
-              </span>
-            )}
-          </div>
-        ) : lastChecked && (
-          <div className="header-status">
-            <span>
-              No updates
-              {import.meta.env.DEV && (
-                <small style={{ fontSize: '0.8em', marginLeft: '0.5em', opacity: 0.7 }}>
-                  ({text.length}/{serverText.length})
-                </small>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginRight: '0.75rem' }}>
+            <input 
+              type="checkbox" 
+              checked={autoUpdate} 
+              onChange={e => setAutoUpdate(e.target.checked)} 
+            />
+            <span style={{ fontSize: '0.85rem' }}>Auto-load updates</span>
+          </label>
+        
+          {updatesAvailable ? (
+            <div className="header-updates">
+              <span>New updates available!</span>
+              <span style={{ fontStyle: 'italic', opacity: 0.9 }}>Press Enter to load</span>
+              <button 
+                className="refresh-button"
+                onClick={applyUpdates}
+              >
+                <FontAwesomeIcon icon={faSync} className="button-icon" /> Load
+              </button>
+              {lastChecked && (
+                <span className="last-checked">
+                  · {lastChecked.toLocaleTimeString()}
+                </span>
               )}
-              <span className="last-checked">
-                · {lastChecked.toLocaleTimeString()}
+            </div>
+          ) : lastChecked && (
+            <div className="header-status">
+              <span>
+                No updates
+                {import.meta.env.DEV && (
+                  <small style={{ fontSize: '0.8em', marginLeft: '0.5em', opacity: 0.7 }}>
+                    ({text.length}/{serverText.length})
+                  </small>
+                )}
+                <span className="last-checked">
+                  · {lastChecked.toLocaleTimeString()}
+                </span>
               </span>
-            </span>
-          </div>
-        )}
-      </div>
-      
-      <div className="text-area-container">
+            </div>
+          )}
+        </div>
+      </div>      <div className="text-area-container">
+        <div className="text-tabs">
+          <button 
+            className={`text-tab ${!showDraft ? 'active-tab' : ''}`} 
+            onClick={() => setShowDraft(false)}
+          >
+            Shared Text
+          </button>
+          <button 
+            className={`text-tab ${showDraft ? 'active-tab' : ''}`} 
+            onClick={() => setShowDraft(true)}
+            disabled={!hasDraft}
+          >
+            My Draft
+          </button>
+          {showDraft ? (
+            <div className="draft-actions">
+              <button 
+                className="draft-action-button draft-delete" 
+                onClick={deleteDraft}
+                title="Delete draft"
+              >
+                Delete Draft
+              </button>
+              <button 
+                className="draft-action-button draft-use" 
+                onClick={() => {
+                  setText(draftText);
+                  setHasChanges(draftText !== savedText);
+                  setStatus('unsaved');
+                  setShowDraft(false);
+                }}
+                title="Use draft as main text"
+              >
+                Use Draft
+              </button>
+            </div>
+          ) : (
+            <div className="draft-actions">
+              <button 
+                className="draft-action-button draft-save" 
+                onClick={saveDraft}
+                title="Save current text as draft"
+              >
+                Save as Draft
+              </button>
+            </div>
+          )}
+        </div>
         <textarea 
-          value={text} 
+          value={showDraft ? draftText : text} 
           onChange={handleTextChange} 
           className="share-textarea"
-          placeholder="Start typing here..."
+          placeholder={showDraft ? "Your private draft text..." : "Start typing here..."}
         />
         <button 
           className="copy-textarea-button" 
