@@ -282,6 +282,27 @@ body.dark-theme {
   caret-color: var(--textarea-text);
 }
 
+.textarea-footer {
+  position: absolute;
+  bottom: 10px;
+  right: 40px; /* Leave room for the copy button */
+  font-size: 0.8rem;
+  color: #888;
+  background-color: rgba(255, 255, 255, 0.8);
+  padding: 2px 8px;
+  border-radius: 4px;
+  z-index: 1;
+}
+
+.dark-theme .textarea-footer {
+  background-color: rgba(50, 50, 50, 0.8);
+  color: #aaa;
+}
+
+.character-count {
+  font-family: monospace;
+}
+
 .copy-textarea-button {
   position: absolute;
   top: 8px;

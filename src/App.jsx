@@ -18,10 +18,11 @@ import ThemeToggle from './components/ThemeToggle.jsx';
 import { useTheme } from './theme/ThemeContext.jsx';
 import Footer from './components/Footer.jsx';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-const LOGO_URL = import.meta.env.VITE_LOGO_URL || '/clippy.png';
-
-// TextShareApp Component
+  // Constants
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+  const LOGO_URL = import.meta.env.VITE_LOGO_URL || '/clippy.png';
+  const MAX_TEXT_LENGTH = 20000; // Limit text to 20,000 characters (approx. 20KB)
+  const MAX_STORAGE_SIZE = 4 * 1024 * 1024; // 4MB limit for localStorage// TextShareApp Component
 function TextShareApp() {
   // Helper function to encode text to base64
   const encodeTextToBase64 = (text) => {
@@ -192,7 +193,36 @@ function TextShareApp() {
   // Save current text as draft
   const saveDraft = () => {
     try {
-      localStorage.setItem(`clippy-draft-${id}`, text);
+      // Check text size
+      if (text.length > MAX_TEXT_LENGTH) {
+        setShowToast(true);
+        setToastMessage(`Draft too large - maximum ${MAX_TEXT_LENGTH.toLocaleString()} characters allowed`);
+        setTimeout(() => setShowToast(false), 3000);
+        return;
+      }
+      
+      // Check if we'd exceed localStorage limits
+      const draftKey = `clippy-draft-${id}`;
+      const draftSize = new Blob([text]).size;
+      
+      // Estimate total localStorage size (rough calculation)
+      let totalSize = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        const value = localStorage.getItem(key);
+        totalSize += new Blob([key]).size + new Blob([value]).size;
+      }
+      
+      // If this new draft would exceed our size limit
+      if (totalSize - (localStorage.getItem(draftKey)?.length || 0) + draftSize > MAX_STORAGE_SIZE) {
+        setShowToast(true);
+        setToastMessage('Cannot save draft - browser storage limit reached');
+        setTimeout(() => setShowToast(false), 3000);
+        return;
+      }
+      
+      // Store the draft
+      localStorage.setItem(draftKey, text);
       setDraftText(text);
       setHasDraft(true);
       setShowToast(true);
@@ -200,6 +230,9 @@ function TextShareApp() {
       setTimeout(() => setShowToast(false), 3000);
     } catch (error) {
       console.error('Error saving draft to localStorage:', error);
+      setShowToast(true);
+      setToastMessage('Error saving draft');
+      setTimeout(() => setShowToast(false), 3000);
     }
   };
 
@@ -440,6 +473,14 @@ function TextShareApp() {
   const handleTextChange = (e) => {
     const newText = e.target.value;
     
+    // Check if text exceeds maximum length
+    if (newText.length > MAX_TEXT_LENGTH) {
+      setShowToast(true);
+      setToastMessage(`Text too long - maximum ${MAX_TEXT_LENGTH.toLocaleString()} characters allowed`);
+      setTimeout(() => setShowToast(false), 3000);
+      return; // Don't update the state
+    }
+    
     if (showDraft) {
       // We're editing the draft
       setDraftText(newText);
@@ -447,6 +488,12 @@ function TextShareApp() {
         localStorage.setItem(`clippy-draft-${id}`, newText);
       } catch (error) {
         console.error('Error auto-saving draft to localStorage:', error);
+        // Only show error toast if it's a storage-related error, not a quota error
+        if (!(error instanceof DOMException && error.name === 'QuotaExceededError')) {
+          setShowToast(true);
+          setToastMessage('Error saving draft');
+          setTimeout(() => setShowToast(false), 3000);
+        }
       }
     } else {
       // We're editing the main text
@@ -725,7 +772,13 @@ function TextShareApp() {
           onChange={handleTextChange} 
           className="share-textarea"
           placeholder={showDraft ? "Your private draft text..." : "Start typing here..."}
+          maxLength={MAX_TEXT_LENGTH}
         />
+        <div className="textarea-footer">
+          <span className="character-count">
+            {(showDraft ? draftText.length : text.length).toLocaleString()} / {MAX_TEXT_LENGTH.toLocaleString()} characters
+          </span>
+        </div>
         <button 
           className="copy-textarea-button" 
           onClick={() => {
