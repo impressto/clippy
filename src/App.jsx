@@ -77,6 +77,20 @@ function TextShareApp() {
   // Active users tracking
   const [activeUsers, setActiveUsers] = useState(1); // Start with yourself
   const clientIdRef = useRef(null);
+  
+  // WebRTC related state
+  const [peerConnections, setPeerConnections] = useState({});
+  const [connectedPeers, setConnectedPeers] = useState([]);
+  const [rtcSupported, setRtcSupported] = useState(false);
+  const [isRtcConnected, setIsRtcConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState({});
+  const peerConnectionsRef = useRef({});
+  const dataChannelsRef = useRef({});
+  const isTypingRef = useRef(false);
+  const pendingTextUpdatesRef = useRef(null);
+  const lastSentTextRef = useRef('');
+  const lastReceivedTextRef = useRef('');
+  
   // Remove local theme state in favor of context
   const { isDark } = useTheme();
   
@@ -478,8 +492,17 @@ function TextShareApp() {
       }
     }, 10000);
     
+    // Set up periodic checking for new clients
+    const clientCheckInterval = setInterval(() => {
+      if (id && clientIdRef.current && rtcSupported && activeUsers > 1) {
+        // Periodically check for new clients we might not be connected to
+        sendPresenceAnnouncement();
+      }
+    }, 15000);
+    
     return () => {
       clearInterval(interval);
+      clearInterval(clientCheckInterval);
       
       // Leave the session when unmounting the component
       if (id && clientIdRef.current) {
@@ -493,11 +516,34 @@ function TextShareApp() {
     // Generate a unique client ID if we don't have one yet
     if (!clientIdRef.current) {
       clientIdRef.current = `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      console.log("Generated client ID:", clientIdRef.current);
+    }
+    
+    // Check if WebRTC is supported
+    if (window.RTCPeerConnection && window.RTCSessionDescription) {
+      console.log("WebRTC is supported in this browser");
+      setRtcSupported(true);
+    } else {
+      console.warn("WebRTC is NOT supported in this browser");
     }
     
     // Ping for active users immediately on mount if we have an ID
     if (id) {
-      pingActiveUsers();
+      console.log("Session ID:", id);
+      
+      // First ping to get active users
+      pingActiveUsers().then(() => {
+        // If WebRTC is supported, start WebRTC signaling
+        if (window.RTCPeerConnection && window.RTCSessionDescription) {
+          console.log("Starting WebRTC signaling...");
+          startWebRTCSignaling();
+          
+          // After a short delay, send a presence announcement to initiate connections
+          setTimeout(() => {
+            sendPresenceAnnouncement();
+          }, 2000);
+        }
+      });
     }
     
     // Set up beforeunload event to leave the session when the user closes the tab
@@ -511,8 +557,689 @@ function TextShareApp() {
     
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      
+      // Clear the polling timeout when unmounting
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+      }
     };
-  }, [id]);
+  }, [id]); // Remove rtcSupported from dependency array since we check it inside
+  
+  // WebRTC Signaling Functions
+  const startWebRTCSignaling = () => {
+    console.log("Starting WebRTC signaling with client ID:", clientIdRef.current);
+    // Start polling for signals
+    pollForSignals();
+  };
+  
+  // Reference to store the polling timeout ID
+  const pollingTimeoutRef = useRef(null);
+  // Track poll interval (will increase with backoff)
+  const pollIntervalRef = useRef(1000); // Start with 1s
+  // Track the last time we received signals
+  const lastSignalTimeRef = useRef(0);
+  // Track if we're in active connection mode
+  const activeConnectionModeRef = useRef(false);
+  
+  const pollForSignals = async () => {
+    if (!id || !clientIdRef.current) return;
+    
+    try {
+      const headers = new Headers();
+      headers.append('X-Client-ID', clientIdRef.current);
+      headers.append('X-Session-ID', id);
+      
+      const response = await fetch(`${API_BASE_URL}/webrtc_signaling.php`, {
+        headers
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        // If we have signals, process them and reset poll interval to be more responsive
+        if (data.signals && data.signals.length > 0) {
+          console.log(`Received ${data.signals.length} WebRTC signals:`, data.signals);
+          
+          // Process each signal
+          for (const signal of data.signals) {
+            processSignal(signal);
+          }
+          
+          // Update last signal time
+          lastSignalTimeRef.current = Date.now();
+          
+          // If we're actively receiving signals, switch to active mode with faster polling
+          activeConnectionModeRef.current = true;
+          pollIntervalRef.current = 1000; // Reset to 1s during active connection
+        } else {
+          // No signals, potentially increase poll interval if we haven't received signals in a while
+          const timeSinceLastSignal = Date.now() - lastSignalTimeRef.current;
+          
+          // If we're in active mode but haven't received signals for 10 seconds, exit active mode
+          if (activeConnectionModeRef.current && timeSinceLastSignal > 10000) {
+            activeConnectionModeRef.current = false;
+          }
+          
+          // If we're not in active mode, implement exponential backoff up to 10 seconds
+          if (!activeConnectionModeRef.current) {
+            // Increase interval with each empty response, max 10s
+            pollIntervalRef.current = Math.min(pollIntervalRef.current * 1.5, 10000);
+          }
+        }
+      }
+      
+      // Schedule next poll with current interval
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = setTimeout(pollForSignals, pollIntervalRef.current);
+    } catch (error) {
+      console.error('Error polling for WebRTC signals:', error);
+      
+      // On error, back off more aggressively
+      pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 15000);
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = setTimeout(pollForSignals, pollIntervalRef.current);
+    }
+  };
+  
+  const sendSignal = async (targetClientId, signal) => {
+    if (!id || !clientIdRef.current) return;
+    
+    try {
+      console.log(`Sending signal to ${targetClientId}:`, signal.type || 'ICE candidate');
+      
+      const headers = new Headers();
+      headers.append('X-Client-ID', clientIdRef.current);
+      headers.append('X-Session-ID', id);
+      headers.append('Content-Type', 'application/json');
+      
+      const response = await fetch(`${API_BASE_URL}/webrtc_signaling.php`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          target: targetClientId,
+          signal
+        })
+      });
+      
+      const data = await response.json();
+      if (data.status === 'success') {
+        console.log(`Successfully sent signal to ${targetClientId}`);
+      } else {
+        console.error(`Error sending signal to ${targetClientId}:`, data);
+      }
+    } catch (error) {
+      console.error('Error sending WebRTC signal:', error);
+    }
+  };
+  
+  const processSignal = async (signalData) => {
+    const { from, signal } = signalData;
+    
+    // Don't process signals from self
+    if (from === clientIdRef.current) return;
+    
+    console.log(`Processing signal from ${from}:`, signal.type || 'ICE candidate');
+    
+    // If it's an offer, we need to create an answer
+    if (signal.type === 'offer') {
+      await handleOffer(from, signal);
+    }
+    // If it's an answer, set the remote description
+    else if (signal.type === 'answer') {
+      await handleAnswer(from, signal);
+    }
+    // If it's an ICE candidate, add it
+    else if (signal.candidate) {
+      await handleCandidate(from, signal);
+    }
+    // If it's a client hello message
+    else if (signal.type === 'hello') {
+      console.log(`Received hello from ${from}, creating offer`);
+      
+      // Create an offer for this client if we don't already have a connection
+      if (!peerConnectionsRef.current[from] || 
+          (peerConnectionsRef.current[from].connectionState !== 'connected' && 
+           peerConnectionsRef.current[from].connectionState !== 'connecting')) {
+        
+        console.log(`No active connection to ${from}, creating new peer connection`);
+        createPeerConnection(from, true);
+      } else {
+        console.log(`Already have connection to ${from}, connection state: ${peerConnectionsRef.current[from].connectionState}`);
+        
+        // If we have a connection but the data channel is closed, recreate it
+        if (!dataChannelsRef.current[from] || dataChannelsRef.current[from].readyState !== 'open') {
+          console.log(`Data channel to ${from} is not open, recreating connection`);
+          
+          // Close existing connection
+          if (peerConnectionsRef.current[from]) {
+            peerConnectionsRef.current[from].close();
+            delete peerConnectionsRef.current[from];
+          }
+          
+          // Create new connection
+          createPeerConnection(from, true);
+        }
+      }
+    }
+    else if (signal.type === 'bye') {
+      console.log(`Peer ${from} disconnected`);
+      handlePeerDisconnect(from);
+    }
+  };
+  
+  const handleOffer = async (peerId, offer) => {
+    try {
+      // Create a peer connection if it doesn't exist
+      const pc = createPeerConnection(peerId, false);
+      
+      // Set the remote description
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      
+      // Create an answer
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      
+      // Send the answer
+      sendSignal(peerId, pc.localDescription);
+    } catch (error) {
+      console.error('Error handling offer:', error);
+    }
+  };
+  
+  const handleAnswer = async (peerId, answer) => {
+    try {
+      // Get the peer connection
+      const pc = peerConnectionsRef.current[peerId];
+      if (!pc) return;
+      
+      // Set the remote description
+      await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    } catch (error) {
+      console.error('Error handling answer:', error);
+    }
+  };
+  
+  const handleCandidate = async (peerId, candidate) => {
+    try {
+      // Get the peer connection
+      const pc = peerConnectionsRef.current[peerId];
+      if (!pc) return;
+      
+      // Add the ICE candidate
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+      console.error('Error handling ICE candidate:', error);
+    }
+  };
+  
+  const createPeerConnection = (peerId, isInitiator) => {
+    console.log(`Creating peer connection with ${peerId}, initiator: ${isInitiator}`);
+    
+    // If we already have a connection for this peer, check its state
+    if (peerConnectionsRef.current[peerId]) {
+      const existingConnection = peerConnectionsRef.current[peerId];
+      const connectionState = existingConnection.connectionState;
+      
+      console.log(`Already have connection for ${peerId}, state: ${connectionState}`);
+      
+      // If the connection is in a good state, return it
+      if (connectionState === 'connected' || connectionState === 'connecting') {
+        return existingConnection;
+      }
+      
+      // Otherwise, close the existing connection
+      console.log(`Existing connection to ${peerId} is in state ${connectionState}, recreating`);
+      handlePeerDisconnect(peerId);
+    }
+    
+    // Configure ICE servers (STUN/TURN)
+    const configuration = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    };
+    
+    // Create a new peer connection
+    const pc = new RTCPeerConnection(configuration);
+    
+    // Store the peer connection
+    peerConnectionsRef.current[peerId] = pc;
+    setPeerConnections(prev => ({...prev, [peerId]: pc}));
+    
+    // Update connection status
+    setConnectionStatus(prev => ({
+      ...prev, 
+      [peerId]: {
+        state: 'connecting',
+        lastUpdated: Date.now()
+      }
+    }));
+    
+    // Create a data channel if initiator
+    if (isInitiator) {
+      console.log(`Creating data channel as initiator for ${peerId}`);
+      const dataChannel = pc.createDataChannel('text');
+      setupDataChannel(dataChannel, peerId);
+    } else {
+      // Otherwise listen for data channel
+      console.log(`Listening for data channel from ${peerId}`);
+      pc.ondatachannel = (event) => {
+        console.log(`Received data channel from ${peerId}`);
+        setupDataChannel(event.channel, peerId);
+      };
+    }
+    
+    // Handle ICE candidates
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log(`Sending ICE candidate to ${peerId}`);
+        sendSignal(peerId, event.candidate);
+      }
+    };
+    
+    // Handle ICE connection state changes
+    pc.oniceconnectionstatechange = () => {
+      console.log(`ICE connection state with ${peerId} changed to: ${pc.iceConnectionState}`);
+      
+      // If ICE connection fails, try to reconnect
+      if (pc.iceConnectionState === 'failed') {
+        console.log(`ICE connection with ${peerId} failed, attempting to restart ICE`);
+        pc.restartIce();
+      }
+    };
+    
+    // Handle connection state changes
+    pc.onconnectionstatechange = () => {
+      console.log(`Connection state with ${peerId} changed to: ${pc.connectionState}`);
+      
+      // Update connection status
+      setConnectionStatus(prev => ({
+        ...prev, 
+        [peerId]: {
+          state: pc.connectionState,
+          lastUpdated: Date.now()
+        }
+      }));
+      
+      if (pc.connectionState === 'connected') {
+        console.log(`Successfully connected to peer ${peerId}!`);
+        // Add peer to connected peers
+        setConnectedPeers(prev => {
+          if (!prev.includes(peerId)) {
+            return [...prev, peerId];
+          }
+          return prev;
+        });
+        
+        // Update overall connection status
+        updateRtcConnectionStatus();
+      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        console.log(`Connection with ${peerId} ended: ${pc.connectionState}`);
+        handlePeerDisconnect(peerId);
+      }
+    };
+    
+    // Create and send an offer if initiator
+    if (isInitiator) {
+      pc.createOffer()
+        .then(offer => pc.setLocalDescription(offer))
+        .then(() => sendSignal(peerId, pc.localDescription))
+        .catch(error => console.error('Error creating offer:', error));
+    }
+    
+    return pc;
+  };
+  
+  const setupDataChannel = (dataChannel, peerId) => {
+    console.log(`Setting up data channel for peer ${peerId}`);
+    dataChannelsRef.current[peerId] = dataChannel;
+    
+    dataChannel.onopen = () => {
+      console.log(`Data channel with ${peerId} opened`);
+      
+      // Update the overall connection status when a data channel opens
+      updateRtcConnectionStatus();
+      
+      // When connected, send current text to peer
+      if (text) {
+        console.log(`Sending initial text to peer ${peerId}`);
+        sendTextToPeer(peerId, text);
+      }
+      
+      // Announce the connection to help complete the mesh network
+      sendPresenceAnnouncement();
+    };
+    
+    dataChannel.onclose = () => {
+      console.log(`Data channel with ${peerId} closed`);
+      updateRtcConnectionStatus();
+    };
+    
+    dataChannel.onmessage = (event) => {
+      console.log(`Received message from ${peerId}:`, event.data.substring(0, 50) + '...');
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'text_update') {
+          console.log(`Received text update from ${peerId}, length: ${data.text.length}`);
+          handleTextUpdateFromPeer(data.text);
+          
+          // Forward the update to all other peers (mesh network)
+          forwardTextUpdateToOtherPeers(peerId, data.text);
+        }
+      } catch (error) {
+        console.error('Error processing message:', error);
+      }
+    };
+  };
+  
+  // Forward text updates to all peers except the original sender
+  const forwardTextUpdateToOtherPeers = (fromPeerId, textToForward) => {
+    // Don't forward if it's identical to what we last sent
+    if (textToForward === lastSentTextRef.current) return;
+    
+    console.log(`Forwarding text update from ${fromPeerId} to other peers`);
+    const forwardedToPeers = [];
+    
+    for (const peerId in dataChannelsRef.current) {
+      // Skip the original sender
+      if (peerId === fromPeerId) continue;
+      
+      const dataChannel = dataChannelsRef.current[peerId];
+      if (dataChannel && dataChannel.readyState === 'open') {
+        try {
+          dataChannel.send(JSON.stringify({
+            type: 'text_update',
+            text: textToForward
+          }));
+          forwardedToPeers.push(peerId);
+        } catch (err) {
+          console.error(`Failed to forward to peer ${peerId}:`, err);
+        }
+      }
+    }
+    
+    if (forwardedToPeers.length > 0) {
+      console.log(`Successfully forwarded text to ${forwardedToPeers.length} peers: ${forwardedToPeers.join(', ')}`);
+      // Update our last sent text reference
+      lastSentTextRef.current = textToForward;
+    }
+  };
+  
+  const handlePeerDisconnect = (peerId) => {
+    console.log(`Handling disconnect for peer ${peerId}`);
+    // Remove peer from connected peers
+    setConnectedPeers(prev => prev.filter(id => id !== peerId));
+    
+    // Update connection status
+    setConnectionStatus(prev => {
+      const newStatus = {...prev};
+      if (newStatus[peerId]) {
+        newStatus[peerId] = {
+          ...newStatus[peerId],
+          state: 'disconnected',
+          lastUpdated: Date.now()
+        };
+      }
+      return newStatus;
+    });
+    
+    // Close and remove data channel
+    if (dataChannelsRef.current[peerId]) {
+      dataChannelsRef.current[peerId].close();
+      delete dataChannelsRef.current[peerId];
+    }
+    
+    // Close and remove peer connection
+    if (peerConnectionsRef.current[peerId]) {
+      peerConnectionsRef.current[peerId].close();
+      delete peerConnectionsRef.current[peerId];
+      
+      // Update state
+      setPeerConnections(prev => {
+        const newPeers = {...prev};
+        delete newPeers[peerId];
+        return newPeers;
+      });
+    }
+    
+    // Update RTC connected state
+    updateRtcConnectionStatus();
+  };
+  
+  // Function to update the overall WebRTC connection status
+  const updateRtcConnectionStatus = () => {
+    // Count connected peers with open data channels
+    let connectedCount = 0;
+    
+    for (const peerId in dataChannelsRef.current) {
+      if (dataChannelsRef.current[peerId].readyState === 'open') {
+        connectedCount++;
+      }
+    }
+    
+    // Update connection status
+    const isConnected = connectedCount > 0;
+    console.log(`WebRTC connection status: ${isConnected ? 'connected' : 'disconnected'} with ${connectedCount} peers`);
+    setIsRtcConnected(isConnected);
+    
+    // If expected peers don't match active users, try to connect to missing peers
+    if (activeUsers > 1 && connectedCount < activeUsers - 1) {
+      console.log(`Missing connections: have ${connectedCount}, need ${activeUsers - 1}`);
+      sendPresenceAnnouncement();
+    }
+  };
+  
+  const sendTextToPeer = (peerId, textToSend) => {
+    const dataChannel = dataChannelsRef.current[peerId];
+    if (dataChannel && dataChannel.readyState === 'open') {
+      console.log(`Sending text update to peer ${peerId}, length: ${textToSend.length}`);
+      dataChannel.send(JSON.stringify({
+        type: 'text_update',
+        text: textToSend
+      }));
+    } else {
+      console.warn(`Cannot send to peer ${peerId}, data channel not open`);
+    }
+  };
+  
+  const broadcastTextToAllPeers = (textToSend) => {
+    if (textToSend === lastSentTextRef.current) return; // Don't send if nothing changed
+    
+    const peerCount = Object.keys(dataChannelsRef.current).length;
+    console.log(`Broadcasting text to ${peerCount} peers, length: ${textToSend.length}`);
+    
+    let successCount = 0;
+    // Track which peers we've sent to
+    const sentToPeers = [];
+    const failedPeers = [];
+    
+    for (const peerId in dataChannelsRef.current) {
+      const dataChannel = dataChannelsRef.current[peerId];
+      if (dataChannel && dataChannel.readyState === 'open') {
+        try {
+          dataChannel.send(JSON.stringify({
+            type: 'text_update',
+            text: textToSend
+          }));
+          successCount++;
+          sentToPeers.push(peerId);
+        } catch (err) {
+          console.error(`Failed to send to peer ${peerId}:`, err);
+          failedPeers.push(peerId);
+        }
+      } else {
+        console.warn(`Cannot send to peer ${peerId}, data channel state: ${dataChannel ? dataChannel.readyState : 'undefined'}`);
+        failedPeers.push(peerId);
+      }
+    }
+    
+    // If we failed to send to any peers, update our connection status
+    if (failedPeers.length > 0) {
+      console.warn(`Failed to send to ${failedPeers.length} peers: ${failedPeers.join(', ')}`);
+      
+      // Check connection state and potentially reconnect
+      for (const failedPeerId of failedPeers) {
+        const connectionState = peerConnectionsRef.current[failedPeerId]?.connectionState;
+        console.log(`Connection state with ${failedPeerId}: ${connectionState || 'no connection'}`);
+        
+        // If connection is failed/disconnected or the data channel is closed, try to reconnect
+        if (!connectionState || 
+            connectionState === 'disconnected' || 
+            connectionState === 'failed' || 
+            connectionState === 'closed') {
+          // Handle disconnect to clean up
+          handlePeerDisconnect(failedPeerId);
+        }
+      }
+      
+      // Check overall connection status
+      updateRtcConnectionStatus();
+    }
+    
+    // If we have fewer successful sends than expected active peers, announce presence
+    if (activeUsers > 2 && successCount < activeUsers - 1) {
+      console.warn(`Only sent to ${successCount} peers but ${activeUsers} users are active. Reconnecting...`);
+      // Try to establish connections with missing peers
+      sendPresenceAnnouncement();
+    }
+    
+    console.log(`Successfully sent text to ${successCount} peers: ${sentToPeers.join(', ')}`);
+    lastSentTextRef.current = textToSend;
+  };
+  
+  const handleTextUpdateFromPeer = (newText) => {
+    console.log(`Handling text update from peer, length: ${newText.length}`);
+    
+    // Check if this is the same as our last received text to prevent loops
+    if (newText === lastReceivedTextRef.current) {
+      console.log('Received duplicate text update, ignoring');
+      return;
+    }
+    
+    // Update our last received text reference
+    lastReceivedTextRef.current = newText;
+    
+    // Only update if we're not currently typing
+    if (!isTypingRef.current) {
+      console.log('Not currently typing, updating text immediately');
+      setText(newText);
+      setSavedText(newText);
+      
+      // Make sure our savedText is updated so hasChanges is false
+      setHasChanges(false);
+    } else {
+      console.log('Currently typing, saving update for later');
+      // Save for later application when we're done typing
+      pendingTextUpdatesRef.current = newText;
+    }
+  };
+  
+  // Announce presence to all active users when active user count changes
+  useEffect(() => {
+    if (activeUsers > 1 && rtcSupported && id && clientIdRef.current) {
+      console.log(`Detected ${activeUsers} active users, announcing our presence`);
+      
+      // Instead of sending to 'all', which isn't a valid target ID,
+      // we'll check for active users and directly announce to them
+      sendPresenceAnnouncement();
+      
+      // When active users count changes, force a quick poll cycle
+      // to establish connections faster
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+      }
+      
+      // Reset polling interval to be responsive when users are detected
+      pollIntervalRef.current = 1000;
+      activeConnectionModeRef.current = true;
+      lastSignalTimeRef.current = Date.now();
+      
+      // Start polling immediately
+      pollForSignals();
+    }
+  }, [activeUsers, rtcSupported, id]);
+  
+  // Function to announce our presence to other users
+  const sendPresenceAnnouncement = async () => {
+    if (!id || !clientIdRef.current) return;
+    
+    try {
+      // Get the list of active users to announce to
+      const headers = new Headers();
+      headers.append('X-Client-ID', clientIdRef.current);
+      
+      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=ping`, {
+        headers
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success' && data.clientList && Array.isArray(data.clientList)) {
+        console.log(`Sending presence announcement to ${data.clientList.length} active clients`);
+        
+        // First, check our current connections
+        const currentPeers = Object.keys(peerConnectionsRef.current);
+        const connectedDataChannels = Object.keys(dataChannelsRef.current).filter(
+          peerId => dataChannelsRef.current[peerId].readyState === 'open'
+        );
+        
+        console.log(`Current peer connections: ${currentPeers.length}, open data channels: ${connectedDataChannels.length}`);
+        
+        // Send hello signal to each client except ourselves
+        for (const otherClientId of data.clientList) {
+          if (otherClientId !== clientIdRef.current) {
+            // Check if we have an active connection with this peer
+            const hasActiveConnection = connectedDataChannels.includes(otherClientId);
+            
+            if (!hasActiveConnection) {
+              console.log(`No active connection to ${otherClientId}, announcing presence`);
+              
+              // Check if we already have a connection attempt in progress
+              const existingConnection = peerConnectionsRef.current[otherClientId];
+              if (existingConnection) {
+                const state = existingConnection.connectionState;
+                console.log(`Existing connection to ${otherClientId} in state: ${state}`);
+                
+                // If the connection is failed or closed, recreate it
+                if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+                  console.log(`Cleaning up failed connection to ${otherClientId}`);
+                  handlePeerDisconnect(otherClientId);
+                  
+                  // Send a new hello signal
+                  sendSignal(otherClientId, { type: 'hello' });
+                }
+              } else {
+                // No existing connection, send hello
+                sendSignal(otherClientId, { type: 'hello' });
+              }
+            } else {
+              console.log(`Already have active connection to ${otherClientId}`);
+            }
+          }
+        }
+        
+        // Check for peers we're connected to that aren't in the active user list
+        // This helps clean up stale connections
+        for (const peerId of currentPeers) {
+          if (!data.clientList.includes(peerId)) {
+            console.log(`Peer ${peerId} is no longer active, disconnecting`);
+            handlePeerDisconnect(peerId);
+          }
+        }
+        
+        // Update overall WebRTC connection status
+        updateRtcConnectionStatus();
+      } else {
+        // If server doesn't provide client list, fall back to broadcast
+        console.log('Server did not provide client list, using broadcast');
+        sendSignal('all', { type: 'hello' });
+      }
+    } catch (error) {
+      console.error('Error sending presence announcement:', error);
+    }
+  };
   
   // Function to ping the server for active users
   const pingActiveUsers = async () => {
@@ -529,6 +1256,9 @@ function TextShareApp() {
       const data = await response.json();
       
       if (data.status === 'success' && data.activeUsers !== undefined) {
+        if (activeUsers !== data.activeUsers) {
+          console.log(`Active users changed: ${activeUsers} -> ${data.activeUsers}`);
+        }
         setActiveUsers(data.activeUsers);
       }
     } catch (error) {
@@ -541,6 +1271,20 @@ function TextShareApp() {
     if (!id || !clientIdRef.current) return;
     
     try {
+      // Send bye signal to all connected peers
+      if (rtcSupported && Object.keys(peerConnectionsRef.current).length > 0) {
+        for (const peerId in peerConnectionsRef.current) {
+          sendSignal(peerId, { type: 'bye' });
+        }
+      }
+      
+      // Close all peer connections
+      for (const peerId in peerConnectionsRef.current) {
+        if (peerConnectionsRef.current[peerId]) {
+          peerConnectionsRef.current[peerId].close();
+        }
+      }
+      
       const headers = new Headers();
       headers.append('X-Client-ID', clientIdRef.current);
       
@@ -554,6 +1298,24 @@ function TextShareApp() {
 
   const handleTextChange = (e) => {
     const newText = e.target.value;
+    
+    // Set typing flag
+    isTypingRef.current = true;
+    
+    // Clear typing flag after delay
+    clearTimeout(window.typingTimeout);
+    window.typingTimeout = setTimeout(() => {
+      isTypingRef.current = false;
+      console.log("Typing stopped, checking for pending updates");
+      
+      // Apply any pending updates
+      if (pendingTextUpdatesRef.current !== null) {
+        console.log("Applying pending text update");
+        setText(pendingTextUpdatesRef.current);
+        setSavedText(pendingTextUpdatesRef.current);
+        pendingTextUpdatesRef.current = null;
+      }
+    }, 500);
     
     // Check if text exceeds maximum length
     if (newText.length > MAX_TEXT_LENGTH) {
@@ -582,6 +1344,14 @@ function TextShareApp() {
       setText(newText);
       setHasChanges(newText !== savedText);
       setStatus('unsaved');
+      
+      // Broadcast to all connected peers if WebRTC is connected
+      if (isRtcConnected && Object.keys(dataChannelsRef.current).length > 0) {
+        console.log(`Broadcasting text change to peers, length: ${newText.length}`);
+        broadcastTextToAllPeers(newText);
+      } else if (Object.keys(dataChannelsRef.current).length > 0) {
+        console.log(`Not broadcasting, WebRTC status: ${isRtcConnected ? 'connected' : 'not connected'}, peers: ${Object.keys(dataChannelsRef.current).length}`);
+      }
     }
   };
 
@@ -908,6 +1678,16 @@ function TextShareApp() {
           >
             <FontAwesomeIcon icon={faShare} className="button-icon" /> Share
           </button>
+          
+          {isRtcConnected && (
+            <button 
+              className="save-permanently-button"
+              onClick={saveText}
+              title="Save the current state to the server permanently"
+            >
+              <FontAwesomeIcon icon={faSave} className="button-icon" /> Save Permanently
+            </button>
+          )}
         </div>
         
         <div className="status">
@@ -926,6 +1706,13 @@ function TextShareApp() {
             <span className="status-unsaved">Unsaved changes</span>
           ) : (
             <span className="status-idle">No changes</span>
+          )}
+          
+          {rtcSupported && isRtcConnected && (
+            <span className="rtc-status">· <span className="rtc-connected">⚡ WebRTC connected</span> ({connectedPeers.length} peer{connectedPeers.length !== 1 ? 's' : ''})</span>
+          )}
+          {rtcSupported && activeUsers > 1 && !isRtcConnected && (
+            <span className="rtc-status">· <span className="rtc-connecting">⏳ Connecting WebRTC...</span></span>
           )}
           {lastChecked && (
             <span className="last-checked"> · Last checked: {lastChecked.toLocaleTimeString()}{!updatesAvailable && ' (no updates)'}</span>

@@ -111,6 +111,56 @@ body.dark-theme {
   color: #a8d1ff;
 }
 
+.rtc-status {
+  margin-left: 8px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rtc-connected {
+  color: #28a745;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rtc-connecting {
+  color: #ffc107;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dark-theme .rtc-connected {
+  color: #4caf50;
+}
+
+.dark-theme .rtc-connecting {
+  color: #ffb74d;
+}
+
+.save-permanently-button {
+  background-color: #ff6b2b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.save-permanently-button:hover {
+  background-color: #e25718;
+}
+
 .button-icon {
   margin-right: 8px;
 }

@@ -115,9 +115,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['id']) && isset($_GET['t
     $action = $_GET['track'] === 'leave' ? 'leave' : 'ping';
     $activeUsers = trackSession($id, $action);
     
+    // Get the list of clients in this session
+    $clientList = [];
+    $sessions = [];
+    if (file_exists($sessionTrackingFile)) {
+        $data = file_get_contents($sessionTrackingFile);
+        if ($data) {
+            $sessions = json_decode($data, true) ?: [];
+            if (isset($sessions[$id]) && isset($sessions[$id]['clients'])) {
+                $clientList = array_keys($sessions[$id]['clients']);
+            }
+        }
+    }
+    
     echo json_encode([
         'status' => 'success',
-        'activeUsers' => $activeUsers
+        'activeUsers' => $activeUsers,
+        'clientList' => $clientList
     ]);
     exit;
 }
