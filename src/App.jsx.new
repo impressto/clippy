@@ -1,0 +1,876 @@
+import { useState, useEffect, useRef } from 'react';
+import { createHashRouter, RouterProvider, Link, useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { QRCodeSVG } from 'qrcode.react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { 
+  faSave, 
+  faSync, 
+  faShare, 
+  faEye, 
+  faEyeSlash, 
+  faCopy, 
+  faPlay, 
+  faHome,
+  faEnvelope,
+  faUsers,
+  faFile,
+  faFileUpload,
+  faFileDownload,
+  faTimes
+} from '@fortawesome/free-solid-svg-icons';
+import './App.css';
+import ThemeToggle from './components/ThemeToggle.jsx';
+import { useTheme } from './theme/ThemeContext.jsx';
+import Footer from './components/Footer.jsx';
+import { useWebRTCManager } from './utils/WebRTCManager.js';
+
+// Constants
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const LOGO_URL = import.meta.env.VITE_LOGO_URL || '/clippy.png';
+const MAX_TEXT_LENGTH = 20000; // Limit text to 20,000 characters (approx. 20KB)
+const MAX_STORAGE_SIZE = 4 * 1024 * 1024; // 4MB limit for localStorage
+// Read debug mode from localStorage
+const DEBUG_MODE = localStorage.getItem('clippy-webrtc-debug') === 'true';
+
+// TextShareApp Component
+function TextShareApp() {
+  // Helper function to encode text to base64
+  const encodeTextToBase64 = (text) => {
+    try {
+      return btoa(encodeURIComponent(text));
+    } catch (e) {
+      console.error('Error encoding text to base64:', e);
+      return '';
+    }
+  };
+  
+  // Helper function to decode base64 text
+  const decodeTextFromBase64 = (encoded) => {
+    try {
+      return decodeURIComponent(atob(encoded));
+    } catch (e) {
+      console.error('Error decoding base64 text:', e);
+      return '';
+    }
+  };
+
+  // Route and URL parameters
+  const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  
+  // UI State
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [showQR, setShowQR] = useState(false);
+  const [showShareOptions, setShowShareOptions] = useState(false);
+  const [passwordProtect, setPasswordProtect] = useState(false);
+  const [password, setPassword] = useState('');
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [syncStatus, setSyncStatus] = useState('idle');
+  const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [showFilePanel, setShowFilePanel] = useState(false);
+  
+  // Text Content State
+  const [text, setText] = useState('');
+  const [savedText, setSavedText] = useState('');
+  const [serverText, setServerText] = useState('');
+  const [lastServerText, setLastServerText] = useState('');
+  const [hasChanges, setHasChanges] = useState(false);
+  
+  // File sharing state
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [incomingFiles, setIncomingFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  
+  // Refs for tracking state across renders
+  const textAreaRef = useRef(null);
+  const typingTimerRef = useRef(null);
+  const rateLimitersRef = useRef({});
+  
+  // WebRTC state management using our custom hook
+  const {
+    rtcSupported,
+    rtcConnected,
+    connectionStatus,
+    activeUsers,
+    dataChannelStatus,
+    debugMode,
+    debugData,
+    broadcastTextToAllPeers,
+    sendPresenceAnnouncement,
+    setDebugMode,
+    clientId
+  } = useWebRTCManager(
+    id,
+    text,
+    setText,
+    setSavedText,
+    setServerText,
+    setLastServerText,
+    setHasChanges,
+    isTyping
+  );
+  
+  // Effect to initialize debug mode from localStorage
+  useEffect(() => {
+    const savedDebugMode = localStorage.getItem('clippy-webrtc-debug') === 'true';
+    setDebugMode(savedDebugMode);
+  }, [setDebugMode]);
+  
+  // Check for URL seed data on load
+  useEffect(() => {
+    const seedData = searchParams.get('seed');
+    
+    if (seedData) {
+      try {
+        // Try to decode the seed data
+        const decodedText = decodeTextFromBase64(seedData);
+        
+        if (decodedText) {
+          console.log('Setting initial text from URL seed');
+          setText(decodedText);
+          setSavedText(decodedText);
+          setServerText(decodedText);
+          setLastServerText(decodedText);
+          
+          // Remove the seed parameter from the URL
+          navigate(`/share/${id}`, { replace: true });
+        }
+      } catch (error) {
+        console.error('Error processing seed data:', error);
+      }
+    }
+  }, [id, searchParams, navigate]);
+
+  // Load text from server or localStorage
+  useEffect(() => {
+    const loadText = async () => {
+      if (!id) return;
+      
+      setIsLoading(true);
+      setLoadError(null);
+      
+      try {
+        // First try to load from localStorage
+        const cachedData = localStorage.getItem(`clippy-text-${id}`);
+        
+        if (cachedData) {
+          try {
+            const { text: cachedText, timestamp } = JSON.parse(cachedData);
+            
+            // Check if the cached data is recent (less than 5 minutes old)
+            const now = Date.now();
+            const cacheAge = now - timestamp;
+            
+            if (cacheAge < 5 * 60 * 1000) {
+              console.log(`Using cached text from ${Math.round(cacheAge/1000)}s ago`);
+              setText(cachedText);
+              setSavedText(cachedText);
+              setServerText(cachedText);
+              setLastServerText(cachedText);
+              
+              // We'll still fetch from server, but we're not blocking the UI
+              setIsLoading(false);
+            }
+          } catch (e) {
+            console.error('Error parsing cached text:', e);
+          }
+        }
+        
+        // Always fetch from server to get the latest version
+        console.log(`Fetching text for session ${id}`);
+        const response = await fetch(`${API_BASE_URL}/share.php?id=${id}`);
+        
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+          const serverText = data.text || '';
+          console.log(`Loaded text from server, length: ${serverText.length}`);
+          
+          setText(serverText);
+          setSavedText(serverText);
+          setServerText(serverText);
+          setLastServerText(serverText);
+          
+          // Cache the text in localStorage
+          try {
+            localStorage.setItem(`clippy-text-${id}`, JSON.stringify({
+              text: serverText,
+              timestamp: Date.now()
+            }));
+          } catch (e) {
+            console.error('Error caching text in localStorage:', e);
+          }
+        } else {
+          throw new Error(data.message || 'Unknown error');
+        }
+      } catch (error) {
+        console.error('Error loading text:', error);
+        setLoadError(`Error: ${error.message}`);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadText();
+  }, [id]);
+  
+  // Function to save text to server
+  const saveText = async (force = false) => {
+    if (!id) return;
+    
+    // Don't save if text hasn't changed and we're not forcing
+    if (!hasChanges && !force) {
+      console.log('Text unchanged, not saving');
+      return;
+    }
+    
+    // Don't exceed max text length
+    if (text.length > MAX_TEXT_LENGTH) {
+      alert(`Text is too large (${text.length} chars). Maximum is ${MAX_TEXT_LENGTH} characters.`);
+      return;
+    }
+    
+    setSaveStatus('saving');
+    
+    try {
+      console.log(`Saving text to server, length: ${text.length}`);
+      
+      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        console.log('Text saved successfully');
+        setSaveStatus('success');
+        setSavedText(text);
+        setServerText(text);
+        setLastServerText(text);
+        setHasChanges(false);
+        
+        // Broadcast the text update to connected peers
+        if (rtcSupported && rtcConnected) {
+          broadcastTextToAllPeers(text);
+        }
+        
+        // Cache the text in localStorage
+        try {
+          localStorage.setItem(`clippy-text-${id}`, JSON.stringify({
+            text,
+            timestamp: Date.now()
+          }));
+        } catch (e) {
+          console.error('Error caching text in localStorage:', e);
+        }
+      } else {
+        throw new Error(data.message || 'Unknown error');
+      }
+    } catch (error) {
+      console.error('Error saving text:', error);
+      setSaveStatus('error');
+    } finally {
+      // Reset save status after 3 seconds
+      setTimeout(() => {
+        setSaveStatus('idle');
+      }, 3000);
+    }
+  };
+  
+  // Function to poll for text updates from the server
+  const syncText = async () => {
+    if (!id) return;
+    
+    // Don't sync if we have unsaved changes to avoid conflicts
+    if (hasChanges || isTyping) {
+      console.log('Has unsaved changes or is typing, skipping sync');
+      return;
+    }
+    
+    setSyncStatus('syncing');
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}`);
+      
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        const newText = data.text || '';
+        
+        // Only update if the text has changed
+        if (newText !== lastServerText) {
+          console.log(`Text changed on server, updating. Old length: ${lastServerText.length}, New length: ${newText.length}`);
+          
+          setText(newText);
+          setSavedText(newText);
+          setServerText(newText);
+          setLastServerText(newText);
+          setHasChanges(false);
+          
+          // Cache the updated text
+          try {
+            localStorage.setItem(`clippy-text-${id}`, JSON.stringify({
+              text: newText,
+              timestamp: Date.now()
+            }));
+          } catch (e) {
+            console.error('Error caching text in localStorage:', e);
+          }
+        } else {
+          console.log('No changes from server');
+        }
+        
+        setSyncStatus('success');
+        setLastSyncTime(new Date());
+      } else {
+        throw new Error(data.message || 'Unknown error');
+      }
+    } catch (error) {
+      console.error('Error syncing text:', error);
+      setSyncStatus('error');
+    } finally {
+      // Reset sync status after 3 seconds
+      setTimeout(() => {
+        setSyncStatus('idle');
+      }, 3000);
+    }
+  };
+  
+  // Set up polling for text updates
+  useEffect(() => {
+    if (!id || !rtcSupported) return;
+    
+    // If WebRTC is supported, we only need to poll occasionally as a fallback
+    const interval = setInterval(syncText, 30000); // 30-second polling as a fallback
+    
+    return () => {
+      clearInterval(interval);
+    };
+  }, [id, rtcSupported]);
+  
+  // Handler for text changes
+  const handleTextChange = (e) => {
+    const newText = e.target.value;
+    
+    // Set typing state
+    setIsTyping(true);
+    
+    // Update state
+    setText(newText);
+    setHasChanges(newText !== savedText);
+    
+    // Clear any existing typing timer
+    if (typingTimerRef.current) {
+      clearTimeout(typingTimerRef.current);
+    }
+    
+    // Set a timer to detect when the user stops typing
+    typingTimerRef.current = setTimeout(() => {
+      setIsTyping(false);
+      
+      // Save changes after typing stops
+      if (newText !== savedText) {
+        saveText();
+      }
+    }, 1500);
+  };
+  
+  // Handle auto-saving when text changes
+  useEffect(() => {
+    if (hasChanges && !isTyping) {
+      // Only auto-save if changes exist and user isn't actively typing
+      saveText();
+    }
+  }, [hasChanges, isTyping]);
+  
+  // Handle the share button click
+  const handleShare = () => {
+    setShowShareOptions(!showShareOptions);
+  };
+  
+  // Handle the QR code toggle
+  const handleToggleQR = () => {
+    setShowQR(!showQR);
+  };
+  
+  // Copy the URL to clipboard
+  const copyToClipboard = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url).then(
+      () => {
+        // Show a temporary "Copied!" message
+        alert('URL copied to clipboard!');
+      },
+      (err) => {
+        console.error('Could not copy URL: ', err);
+      }
+    );
+  };
+  
+  // Share the text directly (creates a new session with the current text as seed)
+  const shareTextDirectly = () => {
+    // First, save any unsaved changes
+    if (hasChanges) {
+      saveText();
+    }
+    
+    // Generate a new session ID
+    const newSessionId = Math.random().toString(36).substring(2, 15);
+    
+    // Encode the current text as a seed for the new session
+    const encodedText = encodeTextToBase64(text);
+    
+    // Create the new URL
+    const newUrl = `${window.location.origin}${window.location.pathname}#/share/${newSessionId}?seed=${encodedText}`;
+    
+    // Open the new URL in a new tab
+    window.open(newUrl, '_blank');
+  };
+  
+  // Handle file selection for upload
+  const handleFileSelect = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setSelectedFile(file);
+    }
+  };
+  
+  // Toggle file sharing panel
+  const toggleFilePanel = () => {
+    setShowFilePanel(!showFilePanel);
+  };
+  
+  // Rate limiting helper
+  const isRateLimited = (key, limitMs = 1000) => {
+    const now = Date.now();
+    if (!rateLimitersRef.current[key] || now - rateLimitersRef.current[key] > limitMs) {
+      rateLimitersRef.current[key] = now;
+      return false;
+    }
+    return true;
+  };
+  
+  // Compute save button status
+  const getSaveButtonClass = () => {
+    if (saveStatus === 'saving') return 'saving';
+    if (saveStatus === 'success') return 'success';
+    if (saveStatus === 'error') return 'error';
+    if (hasChanges) return 'has-changes';
+    return '';
+  };
+  
+  // Compute sync button status
+  const getSyncButtonClass = () => {
+    if (syncStatus === 'syncing') return 'syncing';
+    if (syncStatus === 'success') return 'success';
+    if (syncStatus === 'error') return 'error';
+    return '';
+  };
+  
+  // Format the last sync time
+  const formatLastSyncTime = () => {
+    if (!lastSyncTime) return 'Never';
+    
+    const now = new Date();
+    const diff = Math.floor((now - lastSyncTime) / 1000); // diff in seconds
+    
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    return `${Math.floor(diff / 3600)}h ago`;
+  };
+  
+  // Generate a shareable URL for the current session
+  const getShareableUrl = () => {
+    return window.location.href;
+  };
+  
+  // Build the QR code URL - use the current window location
+  const qrCodeUrl = getShareableUrl();
+  
+  // Generate connection status for display
+  const getConnectionStatusDisplay = () => {
+    if (!rtcSupported) return 'WebRTC not supported';
+    
+    switch (connectionStatus) {
+      case 'connected':
+        return `Connected (${activeUsers} user${activeUsers !== 1 ? 's' : ''})`;
+      case 'connecting':
+        return 'Connecting...';
+      case 'disconnected':
+        return activeUsers > 1 
+          ? `Disconnected (${activeUsers} user${activeUsers !== 1 ? 's' : ''})` 
+          : 'No other users';
+      default:
+        return 'Unknown';
+    }
+  };
+  
+  // Render component
+  return (
+    <div className="text-share">
+      <header className="header">
+        <div className="logo">
+          <Link to="/" className="home-link">
+            <FontAwesomeIcon icon={faHome} />
+          </Link>
+          <h1>Clippy: Shared Text</h1>
+        </div>
+        
+        <div className="action-buttons">
+          <button 
+            className={`save-button ${getSaveButtonClass()}`}
+            onClick={() => saveText(true)}
+            title="Save text to server"
+          >
+            <FontAwesomeIcon icon={faSave} />
+            {hasChanges ? ' *' : ''}
+          </button>
+          
+          <button 
+            className={`sync-button ${getSyncButtonClass()}`}
+            onClick={syncText}
+            title={`Sync with server (Last: ${formatLastSyncTime()})`}
+          >
+            <FontAwesomeIcon icon={faSync} />
+          </button>
+          
+          <button 
+            className="share-button"
+            onClick={handleShare}
+            title="Share this session"
+          >
+            <FontAwesomeIcon icon={faShare} />
+          </button>
+          
+          <button
+            className="file-button"
+            onClick={toggleFilePanel}
+            title="Share files"
+          >
+            <FontAwesomeIcon icon={faFile} />
+          </button>
+          
+          <ThemeToggle />
+        </div>
+      </header>
+      
+      {showShareOptions && (
+        <div className="share-options">
+          <div className="share-option">
+            <button onClick={copyToClipboard} title="Copy URL to clipboard">
+              <FontAwesomeIcon icon={faCopy} /> Copy URL
+            </button>
+          </div>
+          
+          <div className="share-option">
+            <button onClick={handleToggleQR} title="Show/Hide QR Code">
+              <FontAwesomeIcon icon={showQR ? faEyeSlash : faEye} /> 
+              {showQR ? 'Hide QR Code' : 'Show QR Code'}
+            </button>
+          </div>
+          
+          <div className="share-option">
+            <button onClick={shareTextDirectly} title="Share text in a new session">
+              <FontAwesomeIcon icon={faEnvelope} /> Share as New Session
+            </button>
+          </div>
+          
+          <div className="share-option">
+            <button onClick={() => setShowShareOptions(false)} title="Close sharing options">
+              <FontAwesomeIcon icon={faTimes} /> Close
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {showQR && (
+        <div className="qr-code-container">
+          <div className="qr-code">
+            <QRCodeSVG value={qrCodeUrl} size={200} />
+          </div>
+          <p className="qr-code-url">{qrCodeUrl}</p>
+        </div>
+      )}
+      
+      {showFilePanel && (
+        <div className="file-sharing-panel">
+          <div className="file-upload-section">
+            <h3>Share a File</h3>
+            <input 
+              type="file" 
+              onChange={handleFileSelect} 
+              disabled={uploading}
+            />
+            {selectedFile && (
+              <div className="selected-file-info">
+                <p>{selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)</p>
+                {uploadProgress > 0 && (
+                  <div className="progress-bar">
+                    <div 
+                      className="progress" 
+                      style={{ width: `${uploadProgress}%` }}
+                    ></div>
+                  </div>
+                )}
+                <button 
+                  className="upload-button"
+                  disabled={uploading}
+                  onClick={() => {
+                    /* File upload logic would go here */
+                    alert('File sharing implementation pending');
+                  }}
+                >
+                  <FontAwesomeIcon icon={faFileUpload} /> Upload
+                </button>
+              </div>
+            )}
+          </div>
+          
+          <div className="file-download-section">
+            <h3>Shared Files</h3>
+            {incomingFiles.length === 0 ? (
+              <p>No shared files yet</p>
+            ) : (
+              <ul className="file-list">
+                {incomingFiles.map((file, index) => (
+                  <li key={index} className="file-item">
+                    <span className="file-name">{file.name}</span>
+                    <span className="file-size">({(file.size / 1024).toFixed(1)} KB)</span>
+                    <button 
+                      className="download-button"
+                      onClick={() => {
+                        /* File download logic would go here */
+                        alert(`Downloading ${file.name}`);
+                      }}
+                    >
+                      <FontAwesomeIcon icon={faFileDownload} /> Download
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          
+          <button 
+            className="close-panel-button"
+            onClick={toggleFilePanel}
+          >
+            <FontAwesomeIcon icon={faTimes} /> Close
+          </button>
+        </div>
+      )}
+      
+      {isLoading ? (
+        <div className="loading">
+          <p>Loading...</p>
+        </div>
+      ) : loadError ? (
+        <div className="error">
+          <p>{loadError}</p>
+          <button onClick={() => window.location.reload()}>Retry</button>
+        </div>
+      ) : (
+        <div className="text-container">
+          <textarea
+            ref={textAreaRef}
+            value={text}
+            onChange={handleTextChange}
+            placeholder="Type or paste your text here..."
+            spellCheck="true"
+            autoFocus
+          />
+        </div>
+      )}
+      
+      <div className="status-bar">
+        <div className="status-item">
+          <span className="status-label">Status:</span>
+          <span className={`connection-status ${connectionStatus}`}>
+            {getConnectionStatusDisplay()}
+          </span>
+        </div>
+        
+        <div className="status-item">
+          <span className="status-label">Session:</span>
+          <span className="session-id">{id}</span>
+        </div>
+        
+        <div className="status-item">
+          <span className="status-label">Characters:</span>
+          <span className="char-count">{text.length}</span>
+        </div>
+      </div>
+      
+      <Footer 
+        rtcSupported={rtcSupported}
+        rtcConnected={rtcConnected}
+        connectionStatus={connectionStatus}
+        activeUsers={activeUsers}
+        dataChannelStatus={dataChannelStatus}
+        debugMode={debugMode}
+        setDebugMode={setDebugMode}
+        debugData={debugData}
+        clientId={clientId}
+      />
+    </div>
+  );
+}
+
+// Home component
+function Home() {
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState(null);
+  const navigate = useNavigate();
+  const { theme } = useTheme();
+  
+  const createNewSession = async () => {
+    setIsCreating(true);
+    setCreateError(null);
+    
+    try {
+      // Generate a random session ID
+      const sessionId = Math.random().toString(36).substring(2, 15);
+      
+      // Create a new session on the server
+      const response = await fetch(`${API_BASE_URL}/share.php?id=${sessionId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text: ''
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        // Navigate to the new session
+        navigate(`/share/${sessionId}`);
+      } else {
+        throw new Error(data.message || 'Unknown error');
+      }
+    } catch (error) {
+      console.error('Error creating session:', error);
+      setCreateError(`Error: ${error.message}`);
+      setIsCreating(false);
+    }
+  };
+  
+  return (
+    <div className="home">
+      <div className="home-content">
+        <div className="logo-container">
+          <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
+        </div>
+        
+        <h1>Clippy: Text Sharing</h1>
+        <p>Securely share text between devices with end-to-end encryption</p>
+        
+        {createError && (
+          <div className="error">
+            <p>{createError}</p>
+          </div>
+        )}
+        
+        <button 
+          className="create-button"
+          onClick={createNewSession}
+          disabled={isCreating}
+        >
+          {isCreating ? 'Creating...' : 'Create New Session'}
+        </button>
+        
+        <div className="features">
+          <div className="feature">
+            <FontAwesomeIcon icon={faUsers} size="2x" />
+            <h3>Collaborate</h3>
+            <p>Share text with multiple devices or users in real-time</p>
+          </div>
+          
+          <div className="feature">
+            <FontAwesomeIcon icon={faFileUpload} size="2x" />
+            <h3>File Sharing</h3>
+            <p>Share files securely with end-to-end encryption</p>
+          </div>
+          
+          <div className="feature">
+            <FontAwesomeIcon icon={faSync} size="2x" />
+            <h3>Sync</h3>
+            <p>Changes sync automatically across all connected devices</p>
+          </div>
+        </div>
+      </div>
+      
+      <Footer />
+    </div>
+  );
+}
+
+// Error page component
+function ErrorPage() {
+  return (
+    <div className="error-page">
+      <h1>Oops!</h1>
+      <p>Sorry, an unexpected error has occurred.</p>
+      <Link to="/">Go Home</Link>
+    </div>
+  );
+}
+
+// Create router with hash routing
+const router = createHashRouter([
+  {
+    path: '/',
+    element: <Home />,
+    errorElement: <ErrorPage />,
+  },
+  {
+    path: '/share/:id',
+    element: <TextShareApp />,
+    errorElement: <ErrorPage />
+  },
+  {
+    // Route that handles a seed parameter in the URL hash
+    path: '/share/:id/seed/:seedData',
+    element: <TextShareApp />,
+    errorElement: <ErrorPage />
+  }
+]);
+
+// Main App
+function App() {
+  return (
+    <div className="app">
+      <RouterProvider router={router} />
+    </div>
+  );
+}
+
+export default App;

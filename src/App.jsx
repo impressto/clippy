@@ -18,6 +18,17 @@ import './App.css';
 import ThemeToggle from './components/ThemeToggle.jsx';
 import { useTheme } from './theme/ThemeContext.jsx';
 import Footer from './components/Footer.jsx';
+import {
+  handlePeerDisconnect,
+  updateRtcConnectionStatus,
+  sendTextToPeer,
+  broadcastTextToAllPeers,
+  handleTextUpdateFromPeer,
+  forwardTextUpdateToOtherPeers,
+  createPeerConnection
+} from './utils/WebRTCUtils.js';
+import { canCallEndpoint } from './utils/RateLimiter.js';
+import { enableWebRTCDebug, sendWebRTCLogs } from './utils/WebRTCDebug.js';
 
   // Constants
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -87,6 +98,36 @@ function TextShareApp() {
   const peerConnectionsRef = useRef({});
   const dataChannelsRef = useRef({});
   const isTypingRef = useRef(false);
+  
+  // Connection status logger - helps monitor WebRTC status
+  const connectionLoggerRef = useRef(null);
+  
+  // Function to log the current WebRTC connection status
+  const logConnectionStatus = () => {
+    // Only log when we have an active session
+    if (!id || !clientIdRef.current) return;
+    
+    const connectedPeersCount = Object.keys(dataChannelsRef.current).filter(
+      peerId => dataChannelsRef.current[peerId].readyState === 'open'
+    ).length;
+    
+    const expectedPeerCount = activeUsers - 1;
+    const allPeersConnected = connectedPeersCount >= expectedPeerCount && expectedPeerCount > 0;
+    
+    console.log(
+      `WebRTC Status: ${allPeersConnected ? 'FULLY CONNECTED' : 'PARTIAL CONNECTION'} - ` +
+      `Connected: ${connectedPeersCount}/${expectedPeerCount}, ` +
+      `Polling interval: ${pollIntervalRef.current}ms`
+    );
+    
+    // Log details of each connection
+    for (const peerId in dataChannelsRef.current) {
+      console.log(`- Peer ${peerId}: ${dataChannelsRef.current[peerId].readyState}`);
+    }
+    
+    // Schedule next log
+    connectionLoggerRef.current = setTimeout(logConnectionStatus, 30000); // Log every 30 seconds
+  };
   const pendingTextUpdatesRef = useRef(null);
   const lastSentTextRef = useRef('');
   const lastReceivedTextRef = useRef('');
@@ -490,19 +531,40 @@ function TextShareApp() {
       if (id && clientIdRef.current) {
         pingActiveUsers();
       }
-    }, 10000);
+    }, 10000); // 10 second interval is fine since we have rate limiting
     
-    // Set up periodic checking for new clients
+    // Set up periodic checking for new clients with dynamic interval
     const clientCheckInterval = setInterval(() => {
       if (id && clientIdRef.current && rtcSupported && activeUsers > 1) {
-        // Periodically check for new clients we might not be connected to
-        sendPresenceAnnouncement();
+        // Check if we have connections to all peers
+        const connectedPeersCount = Object.keys(dataChannelsRef.current).filter(
+          peerId => dataChannelsRef.current[peerId].readyState === 'open'
+        ).length;
+        
+        const allPeersConnected = connectedPeersCount >= activeUsers - 1;
+        
+        // If we're fully connected, we don't need to check as often
+        if (!allPeersConnected || Math.random() < 0.3) { // Only check ~30% of the time when fully connected
+          // Periodically check for new clients we might not be connected to
+          // Rate limiting ensures we don't hit the server too frequently
+          sendPresenceAnnouncement();
+        }
+        
+        // Send WebRTC debug logs periodically, but only when not fully connected or randomly
+        if (window.webrtcLogs && window.webrtcLogs.length > 0 && (!allPeersConnected || Math.random() < 0.2)) {
+          sendWebRTCLogs(id, clientIdRef.current);
+        }
       }
-    }, 15000);
+    }, 15000); // 15 second interval with rate limiting
     
     return () => {
       clearInterval(interval);
       clearInterval(clientCheckInterval);
+      
+      // Clear the connection logger
+      if (connectionLoggerRef.current) {
+        clearTimeout(connectionLoggerRef.current);
+      }
       
       // Leave the session when unmounting the component
       if (id && clientIdRef.current) {
@@ -523,6 +585,9 @@ function TextShareApp() {
     if (window.RTCPeerConnection && window.RTCSessionDescription) {
       console.log("WebRTC is supported in this browser");
       setRtcSupported(true);
+      
+      // Enable WebRTC debugging
+      enableWebRTCDebug();
     } else {
       console.warn("WebRTC is NOT supported in this browser");
     }
@@ -537,6 +602,9 @@ function TextShareApp() {
         if (window.RTCPeerConnection && window.RTCSessionDescription) {
           console.log("Starting WebRTC signaling...");
           startWebRTCSignaling();
+          
+          // Start the connection status logger
+          logConnectionStatus();
           
           // After a short delay, send a presence announcement to initiate connections
           setTimeout(() => {
@@ -584,6 +652,23 @@ function TextShareApp() {
   const pollForSignals = async () => {
     if (!id || !clientIdRef.current) return;
     
+    // Don't call the rate limiter here since we use a dynamic polling interval instead
+    // The polling logic already handles backoff
+    
+    // Check if we already have connections to all peers
+    const connectedPeersCount = Object.keys(dataChannelsRef.current).filter(
+      peerId => dataChannelsRef.current[peerId].readyState === 'open'
+    ).length;
+    
+    // If we have connections to all peers, we can poll less frequently
+    if (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) {
+      // Keep a much slower polling rate when all peers are connected
+      if (pollIntervalRef.current < 60000) { // If less than 60 seconds
+        pollIntervalRef.current = 60000; // Set to 60 seconds (1 minute)
+        console.log(`All peers connected, using very slow signaling poll rate: ${pollIntervalRef.current}ms`);
+      }
+    }
+    
     try {
       const headers = new Headers();
       headers.append('X-Client-ID', clientIdRef.current);
@@ -620,6 +705,18 @@ function TextShareApp() {
             activeConnectionModeRef.current = false;
           }
           
+          // If we have established WebRTC connections to all active peers, we can slow down polling significantly
+          const connectedPeersCount = Object.keys(dataChannelsRef.current).filter(
+            peerId => dataChannelsRef.current[peerId].readyState === 'open'
+          ).length;
+          
+          // If we have connections to everyone (activeUsers minus ourselves)
+          if (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) {
+            // Set a very long poll interval since we don't need signaling anymore
+            // But still keep it running at a slow rate in case new peers join
+            pollIntervalRef.current = Math.min(60000, pollIntervalRef.current * 2); // Up to 1 minute
+            console.log(`All peers connected (${connectedPeersCount}/${activeUsers-1}), reducing signaling poll rate to ${pollIntervalRef.current}ms`);
+          } else
           // If we're not in active mode, implement exponential backoff up to 10 seconds
           if (!activeConnectionModeRef.current) {
             // Increase interval with each empty response, max 10s
@@ -635,7 +732,18 @@ function TextShareApp() {
       console.error('Error polling for WebRTC signals:', error);
       
       // On error, back off more aggressively
-      pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 15000);
+      // Check if we're fully connected
+      const connectedPeersCount = Object.keys(dataChannelsRef.current).filter(
+        peerId => dataChannelsRef.current[peerId].readyState === 'open'
+      ).length;
+      
+      // Allow longer backoff intervals when we have full connectivity
+      if (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) {
+        pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 60000); // Up to 1 minute on error
+        console.log(`Network error, but all peers connected. Extended backoff to ${pollIntervalRef.current}ms`);
+      } else {
+        pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 15000); // Up to 15 seconds
+      }
       clearTimeout(pollingTimeoutRef.current);
       pollingTimeoutRef.current = setTimeout(pollForSignals, pollIntervalRef.current);
     }
@@ -643,6 +751,16 @@ function TextShareApp() {
   
   const sendSignal = async (targetClientId, signal) => {
     if (!id || !clientIdRef.current) return;
+    
+    // Rate limit sending signals to the same target
+    // Use a shorter timeout for critical signaling messages like offers/answers
+    const isNegotiation = signal.type === 'offer' || signal.type === 'answer' || signal.type === 'hello';
+    const timeout = isNegotiation ? 2000 : 5000; // 2s for negotiation, 5s for other signals
+    
+    if (!canCallEndpoint(`send-signal-${id}-${targetClientId}-${signal.type || 'ice'}`, timeout)) {
+      console.log(`Rate limited: Not sending ${signal.type || 'ICE candidate'} to ${targetClientId}`);
+      return;
+    }
     
     try {
       console.log(`Sending signal to ${targetClientId}:`, signal.type || 'ICE candidate');
@@ -666,6 +784,24 @@ function TextShareApp() {
         console.log(`Successfully sent signal to ${targetClientId}`);
       } else {
         console.error(`Error sending signal to ${targetClientId}:`, data);
+        
+        // If there's an error sending a signal, try resending after a short delay
+        // but only for important negotiation signals
+        if (isNegotiation) {
+          setTimeout(() => {
+            console.log(`Retrying sending ${signal.type} to ${targetClientId}`);
+            // We need to bypass rate limiting for the retry
+            // This is a special case where we force a retry
+            fetch(`${API_BASE_URL}/webrtc_signaling.php`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                target: targetClientId,
+                signal
+              })
+            }).catch(err => console.error(`Retry failed: ${err.message}`));
+          }, 2000);
+        }
       }
     } catch (error) {
       console.error('Error sending WebRTC signal:', error);
@@ -702,7 +838,7 @@ function TextShareApp() {
            peerConnectionsRef.current[from].connectionState !== 'connecting')) {
         
         console.log(`No active connection to ${from}, creating new peer connection`);
-        createPeerConnection(from, true);
+        createPeerConnectionWrapper(from, true);
       } else {
         console.log(`Already have connection to ${from}, connection state: ${peerConnectionsRef.current[from].connectionState}`);
         
@@ -717,29 +853,35 @@ function TextShareApp() {
           }
           
           // Create new connection
-          createPeerConnection(from, true);
+          createPeerConnectionWrapper(from, true);
         }
       }
     }
     else if (signal.type === 'bye') {
       console.log(`Peer ${from} disconnected`);
-      handlePeerDisconnect(from);
+      handlePeerDisconnectWrapper(from);
     }
   };
   
   const handleOffer = async (peerId, offer) => {
     try {
+      console.log(`Handling offer from ${peerId}:`, offer);
+      
       // Create a peer connection if it doesn't exist
-      const pc = createPeerConnection(peerId, false);
+      const pc = createPeerConnectionWrapper(peerId, false);
       
       // Set the remote description
+      console.log(`Setting remote description for ${peerId}`);
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       
       // Create an answer
+      console.log(`Creating answer for ${peerId}`);
       const answer = await pc.createAnswer();
+      console.log(`Setting local description for ${peerId}`);
       await pc.setLocalDescription(answer);
       
       // Send the answer
+      console.log(`Sending answer to ${peerId}`);
       sendSignal(peerId, pc.localDescription);
     } catch (error) {
       console.error('Error handling offer:', error);
@@ -772,123 +914,22 @@ function TextShareApp() {
     }
   };
   
-  const createPeerConnection = (peerId, isInitiator) => {
-    console.log(`Creating peer connection with ${peerId}, initiator: ${isInitiator}`);
-    
-    // If we already have a connection for this peer, check its state
-    if (peerConnectionsRef.current[peerId]) {
-      const existingConnection = peerConnectionsRef.current[peerId];
-      const connectionState = existingConnection.connectionState;
-      
-      console.log(`Already have connection for ${peerId}, state: ${connectionState}`);
-      
-      // If the connection is in a good state, return it
-      if (connectionState === 'connected' || connectionState === 'connecting') {
-        return existingConnection;
-      }
-      
-      // Otherwise, close the existing connection
-      console.log(`Existing connection to ${peerId} is in state ${connectionState}, recreating`);
-      handlePeerDisconnect(peerId);
-    }
-    
-    // Configure ICE servers (STUN/TURN)
-    const configuration = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    };
-    
-    // Create a new peer connection
-    const pc = new RTCPeerConnection(configuration);
-    
-    // Store the peer connection
-    peerConnectionsRef.current[peerId] = pc;
-    setPeerConnections(prev => ({...prev, [peerId]: pc}));
-    
-    // Update connection status
-    setConnectionStatus(prev => ({
-      ...prev, 
-      [peerId]: {
-        state: 'connecting',
-        lastUpdated: Date.now()
-      }
-    }));
-    
-    // Create a data channel if initiator
-    if (isInitiator) {
-      console.log(`Creating data channel as initiator for ${peerId}`);
-      const dataChannel = pc.createDataChannel('text');
-      setupDataChannel(dataChannel, peerId);
-    } else {
-      // Otherwise listen for data channel
-      console.log(`Listening for data channel from ${peerId}`);
-      pc.ondatachannel = (event) => {
-        console.log(`Received data channel from ${peerId}`);
-        setupDataChannel(event.channel, peerId);
-      };
-    }
-    
-    // Handle ICE candidates
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log(`Sending ICE candidate to ${peerId}`);
-        sendSignal(peerId, event.candidate);
-      }
-    };
-    
-    // Handle ICE connection state changes
-    pc.oniceconnectionstatechange = () => {
-      console.log(`ICE connection state with ${peerId} changed to: ${pc.iceConnectionState}`);
-      
-      // If ICE connection fails, try to reconnect
-      if (pc.iceConnectionState === 'failed') {
-        console.log(`ICE connection with ${peerId} failed, attempting to restart ICE`);
-        pc.restartIce();
-      }
-    };
-    
-    // Handle connection state changes
-    pc.onconnectionstatechange = () => {
-      console.log(`Connection state with ${peerId} changed to: ${pc.connectionState}`);
-      
-      // Update connection status
-      setConnectionStatus(prev => ({
-        ...prev, 
-        [peerId]: {
-          state: pc.connectionState,
-          lastUpdated: Date.now()
-        }
-      }));
-      
-      if (pc.connectionState === 'connected') {
-        console.log(`Successfully connected to peer ${peerId}!`);
-        // Add peer to connected peers
-        setConnectedPeers(prev => {
-          if (!prev.includes(peerId)) {
-            return [...prev, peerId];
-          }
-          return prev;
-        });
-        
-        // Update overall connection status
-        updateRtcConnectionStatus();
-      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        console.log(`Connection with ${peerId} ended: ${pc.connectionState}`);
-        handlePeerDisconnect(peerId);
-      }
-    };
-    
-    // Create and send an offer if initiator
-    if (isInitiator) {
-      pc.createOffer()
-        .then(offer => pc.setLocalDescription(offer))
-        .then(() => sendSignal(peerId, pc.localDescription))
-        .catch(error => console.error('Error creating offer:', error));
-    }
-    
-    return pc;
+  const createPeerConnectionWrapper = (peerId, isInitiator) => {
+    // Call the utility function with all required parameters
+    return createPeerConnection(
+      peerId,
+      isInitiator,
+      peerConnectionsRef,
+      dataChannelsRef,
+      setPeerConnections,
+      setConnectionStatus,
+      setConnectedPeers,
+      handlePeerDisconnect,
+      setupDataChannel,
+      updateRtcConnectionStatus,
+      sendSignal,
+      text
+    );
   };
   
   const setupDataChannel = (dataChannel, peerId) => {
@@ -899,7 +940,7 @@ function TextShareApp() {
       console.log(`Data channel with ${peerId} opened`);
       
       // Update the overall connection status when a data channel opens
-      updateRtcConnectionStatus();
+      updateRtcConnectionStatusWrapper();
       
       // When connected, send current text to peer
       if (text) {
@@ -913,7 +954,7 @@ function TextShareApp() {
     
     dataChannel.onclose = () => {
       console.log(`Data channel with ${peerId} closed`);
-      updateRtcConnectionStatus();
+      updateRtcConnectionStatusWrapper();
     };
     
     dataChannel.onmessage = (event) => {
@@ -923,7 +964,7 @@ function TextShareApp() {
         
         if (data.type === 'text_update') {
           console.log(`Received text update from ${peerId}, length: ${data.text.length}`);
-          handleTextUpdateFromPeer(data.text);
+          handleTextUpdateFromPeerWrapper(data.text);
           
           // Forward the update to all other peers (mesh network)
           forwardTextUpdateToOtherPeers(peerId, data.text);
@@ -967,81 +1008,37 @@ function TextShareApp() {
     }
   };
   
-  const handlePeerDisconnect = (peerId) => {
-    console.log(`Handling disconnect for peer ${peerId}`);
-    // Remove peer from connected peers
-    setConnectedPeers(prev => prev.filter(id => id !== peerId));
-    
-    // Update connection status
-    setConnectionStatus(prev => {
-      const newStatus = {...prev};
-      if (newStatus[peerId]) {
-        newStatus[peerId] = {
-          ...newStatus[peerId],
-          state: 'disconnected',
-          lastUpdated: Date.now()
-        };
-      }
-      return newStatus;
-    });
-    
-    // Close and remove data channel
-    if (dataChannelsRef.current[peerId]) {
-      dataChannelsRef.current[peerId].close();
-      delete dataChannelsRef.current[peerId];
-    }
-    
-    // Close and remove peer connection
-    if (peerConnectionsRef.current[peerId]) {
-      peerConnectionsRef.current[peerId].close();
-      delete peerConnectionsRef.current[peerId];
-      
-      // Update state
-      setPeerConnections(prev => {
-        const newPeers = {...prev};
-        delete newPeers[peerId];
-        return newPeers;
-      });
-    }
-    
-    // Update RTC connected state
-    updateRtcConnectionStatus();
+  const handlePeerDisconnectWrapper = (peerId) => {
+    // Use the imported utility function with all the needed parameters
+    handlePeerDisconnect(
+      peerId,
+      dataChannelsRef,
+      peerConnectionsRef,
+      setConnectedPeers,
+      setConnectionStatus,
+      setPeerConnections,
+      updateRtcConnectionStatusWrapper
+    );
   };
   
   // Function to update the overall WebRTC connection status
-  const updateRtcConnectionStatus = () => {
-    // Count connected peers with open data channels
-    let connectedCount = 0;
-    
-    for (const peerId in dataChannelsRef.current) {
-      if (dataChannelsRef.current[peerId].readyState === 'open') {
-        connectedCount++;
-      }
-    }
-    
-    // Update connection status
-    const isConnected = connectedCount > 0;
-    console.log(`WebRTC connection status: ${isConnected ? 'connected' : 'disconnected'} with ${connectedCount} peers`);
-    setIsRtcConnected(isConnected);
-    
-    // If expected peers don't match active users, try to connect to missing peers
-    if (activeUsers > 1 && connectedCount < activeUsers - 1) {
-      console.log(`Missing connections: have ${connectedCount}, need ${activeUsers - 1}`);
-      sendPresenceAnnouncement();
-    }
+  const updateRtcConnectionStatusWrapper = () => {
+    // Use the imported utility function with all the needed parameters
+    updateRtcConnectionStatus(
+      dataChannelsRef,
+      activeUsers,
+      setIsRtcConnected,
+      sendPresenceAnnouncement
+    );
   };
   
-  const sendTextToPeer = (peerId, textToSend) => {
-    const dataChannel = dataChannelsRef.current[peerId];
-    if (dataChannel && dataChannel.readyState === 'open') {
-      console.log(`Sending text update to peer ${peerId}, length: ${textToSend.length}`);
-      dataChannel.send(JSON.stringify({
-        type: 'text_update',
-        text: textToSend
-      }));
-    } else {
-      console.warn(`Cannot send to peer ${peerId}, data channel not open`);
-    }
+  const sendTextToPeerWrapper = (peerId, textToSend) => {
+    // Use the imported utility function with all the needed parameters
+    sendTextToPeer(
+      peerId,
+      textToSend,
+      dataChannelsRef
+    );
   };
   
   const broadcastTextToAllPeers = (textToSend) => {
@@ -1090,12 +1087,12 @@ function TextShareApp() {
             connectionState === 'failed' || 
             connectionState === 'closed') {
           // Handle disconnect to clean up
-          handlePeerDisconnect(failedPeerId);
+          handlePeerDisconnectWrapper(failedPeerId);
         }
       }
       
       // Check overall connection status
-      updateRtcConnectionStatus();
+      updateRtcConnectionStatusWrapper();
     }
     
     // If we have fewer successful sends than expected active peers, announce presence
@@ -1136,6 +1133,20 @@ function TextShareApp() {
     }
   };
   
+  // Wrapper function to call the imported handleTextUpdateFromPeer from WebRTCUtils with all required parameters
+  const handleTextUpdateFromPeerWrapper = (newText) => {
+    // Use the imported utility function with all the needed parameters
+    handleTextUpdateFromPeer(
+      newText,
+      lastReceivedTextRef,
+      isTypingRef,
+      pendingTextUpdatesRef,
+      setText,
+      setSavedText,
+      setHasChanges
+    );
+  };
+  
   // Announce presence to all active users when active user count changes
   useEffect(() => {
     if (activeUsers > 1 && rtcSupported && id && clientIdRef.current) {
@@ -1164,6 +1175,19 @@ function TextShareApp() {
   // Function to announce our presence to other users
   const sendPresenceAnnouncement = async () => {
     if (!id || !clientIdRef.current) return;
+    
+    // Check if we already have connections to all peers
+    const connectedPeersCount = Object.keys(dataChannelsRef.current).filter(
+      peerId => dataChannelsRef.current[peerId].readyState === 'open'
+    ).length;
+    
+    // If we have connections to all peers, we can reduce the announcement frequency
+    const announcementInterval = (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) ? 30000 : 5000;
+    
+    // Rate limit presence announcements based on connection status
+    if (!canCallEndpoint(`send-presence-${id}`, announcementInterval)) {
+      return;
+    }
     
     try {
       // Get the list of active users to announce to
@@ -1205,7 +1229,7 @@ function TextShareApp() {
                 // If the connection is failed or closed, recreate it
                 if (state === 'failed' || state === 'closed' || state === 'disconnected') {
                   console.log(`Cleaning up failed connection to ${otherClientId}`);
-                  handlePeerDisconnect(otherClientId);
+                  handlePeerDisconnectWrapper(otherClientId);
                   
                   // Send a new hello signal
                   sendSignal(otherClientId, { type: 'hello' });
@@ -1225,12 +1249,12 @@ function TextShareApp() {
         for (const peerId of currentPeers) {
           if (!data.clientList.includes(peerId)) {
             console.log(`Peer ${peerId} is no longer active, disconnecting`);
-            handlePeerDisconnect(peerId);
+            handlePeerDisconnectWrapper(peerId);
           }
         }
         
         // Update overall WebRTC connection status
-        updateRtcConnectionStatus();
+        updateRtcConnectionStatusWrapper();
       } else {
         // If server doesn't provide client list, fall back to broadcast
         console.log('Server did not provide client list, using broadcast');
@@ -1245,6 +1269,19 @@ function TextShareApp() {
   const pingActiveUsers = async () => {
     if (!id || !clientIdRef.current) return;
     
+    // Check if we already have connections to all peers
+    const connectedPeersCount = Object.keys(dataChannelsRef.current).filter(
+      peerId => dataChannelsRef.current[peerId].readyState === 'open'
+    ).length;
+    
+    // If we have connections to all peers, we can reduce the ping frequency
+    const pingInterval = (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) ? 30000 : 5000;
+    
+    // Rate limit this call based on connection status
+    if (!canCallEndpoint(`ping-active-users-${id}`, pingInterval)) {
+      return;
+    }
+    
     try {
       const headers = new Headers();
       headers.append('X-Client-ID', clientIdRef.current);
@@ -1258,6 +1295,18 @@ function TextShareApp() {
       if (data.status === 'success' && data.activeUsers !== undefined) {
         if (activeUsers !== data.activeUsers) {
           console.log(`Active users changed: ${activeUsers} -> ${data.activeUsers}`);
+          
+          // If user count increased, reset the polling interval to be more responsive
+          if (data.activeUsers > activeUsers) {
+            pollIntervalRef.current = 1000;
+            console.log(`New users detected, resetting signaling poll interval to ${pollIntervalRef.current}ms`);
+            
+            // Force an immediate poll to connect with new users
+            if (pollingTimeoutRef.current) {
+              clearTimeout(pollingTimeoutRef.current);
+              pollForSignals();
+            }
+          }
         }
         setActiveUsers(data.activeUsers);
       }
