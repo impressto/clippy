@@ -149,6 +149,8 @@ export const createPeerConnection = (
       });
       
       // Update overall connection status
+      // We avoid calling sendPresenceAnnouncement here to prevent loops
+      // The main app will handle checking if more peers need connecting
       updateRtcConnectionStatus(
         dataChannelsRef,
         null, // activeUsers is not needed here
@@ -236,8 +238,10 @@ export const handlePeerDisconnect = (
     });
   }
   
-  // Update RTC connected state
-  updateRtcConnectionStatus();
+  // Update RTC connected state - pass the necessary references
+  // We don't have activeUsers or sendPresenceAnnouncement here,
+  // but we just need to update the connected state
+  updateRtcConnectionStatus(dataChannelsRef);
 };
 
 /**
@@ -266,10 +270,12 @@ export const updateRtcConnectionStatus = (
   // Update connection status
   const isConnected = connectedCount > 0;
   console.log(`WebRTC connection status: ${isConnected ? 'connected' : 'disconnected'} with ${connectedCount} peers`);
-  setIsRtcConnected(isConnected);
+  if (setIsRtcConnected) {
+    setIsRtcConnected(isConnected);
+  }
   
   // If expected peers don't match active users, try to connect to missing peers
-  if (activeUsers > 1 && connectedCount < activeUsers - 1) {
+  if (activeUsers && sendPresenceAnnouncement && activeUsers > 1 && connectedCount < activeUsers - 1) {
     console.log(`Missing connections: have ${connectedCount}, need ${activeUsers - 1}`);
     sendPresenceAnnouncement();
   }
@@ -290,9 +296,11 @@ export const sendTextToPeer = (
   const dataChannel = dataChannelsRef.current[peerId];
   if (dataChannel && dataChannel.readyState === 'open') {
     console.log(`Sending text update to peer ${peerId}, length: ${textToSend.length}`);
+    const timestamp = Date.now();
     dataChannel.send(JSON.stringify({
       type: 'text_update',
-      text: textToSend
+      text: textToSend,
+      timestamp: timestamp
     }));
   } else {
     console.warn(`Cannot send to peer ${peerId}, data channel not open`);
@@ -337,13 +345,18 @@ export const broadcastTextToAllPeers = (
   const sentToPeers = [];
   const failedPeers = [];
   
+  // Create a single timestamp for all messages in this broadcast
+  // This ensures all peers receive the same timestamp
+  const timestamp = Date.now();
+  
   for (const peerId in dataChannelsRef.current) {
     const dataChannel = dataChannelsRef.current[peerId];
     if (dataChannel && dataChannel.readyState === 'open') {
       try {
         dataChannel.send(JSON.stringify({
           type: 'text_update',
-          text: textToSend
+          text: textToSend,
+          timestamp: timestamp
         }));
         successCount++;
         sentToPeers.push(peerId);
@@ -427,9 +440,11 @@ export const handleTextUpdateFromPeer = (
   pendingTextUpdatesRef,
   setText,
   setSavedText,
-  setHasChanges
+  setHasChanges,
+  timestamp = 0,
+  lastReceivedTimestampRef = { current: 0 }
 ) => {
-  console.log(`Handling text update from peer, length: ${newText.length}`);
+  console.log(`Handling text update from peer, length: ${newText.length}, timestamp: ${timestamp}`);
   
   // Check if this is the same as our last received text to prevent loops
   if (newText === lastReceivedTextRef.current) {
@@ -437,8 +452,17 @@ export const handleTextUpdateFromPeer = (
     return;
   }
   
-  // Update our last received text reference
+  // Check if this is an older update (out of order)
+  if (timestamp > 0 && lastReceivedTimestampRef.current > 0 && timestamp < lastReceivedTimestampRef.current) {
+    console.log(`Ignoring older update (timestamp ${timestamp} < ${lastReceivedTimestampRef.current})`);
+    return;
+  }
+  
+  // Update our last received text reference and timestamp
   lastReceivedTextRef.current = newText;
+  if (timestamp > 0) {
+    lastReceivedTimestampRef.current = timestamp;
+  }
   
   // Only update if we're not currently typing
   if (!isTypingRef.current) {
@@ -462,12 +486,14 @@ export const handleTextUpdateFromPeer = (
  * @param {string} textToForward - The text to forward
  * @param {Object} lastSentTextRef - Reference to last sent text
  * @param {Object} dataChannelsRef - Reference to data channels
+ * @param {number} timestamp - Timestamp of the original update
  */
 export const forwardTextUpdateToOtherPeers = (
   fromPeerId,
   textToForward,
   lastSentTextRef,
-  dataChannelsRef
+  dataChannelsRef,
+  timestamp = Date.now()
 ) => {
   // Don't forward if it's identical to what we last sent
   if (textToForward === lastSentTextRef.current) return;
@@ -484,7 +510,8 @@ export const forwardTextUpdateToOtherPeers = (
       try {
         dataChannel.send(JSON.stringify({
           type: 'text_update',
-          text: textToForward
+          text: textToForward,
+          timestamp: timestamp
         }));
         forwardedToPeers.push(peerId);
       } catch (err) {
@@ -525,7 +552,8 @@ export const setupDataChannel = (
     console.log(`Data channel with ${peerId} opened`);
     
     // Update the overall connection status when a data channel opens
-    updateRtcConnectionStatus();
+    // Use the function passed from the app component which has all required parameters
+    updateRtcConnectionStatus(dataChannelsRef);
     
     // When connected, send current text to peer
     if (text) {
@@ -534,12 +562,14 @@ export const setupDataChannel = (
     }
     
     // Announce the connection to help complete the mesh network
-    sendPresenceAnnouncement();
+    if (sendPresenceAnnouncement) {
+      sendPresenceAnnouncement();
+    }
   };
   
   dataChannel.onclose = () => {
     console.log(`Data channel with ${peerId} closed`);
-    updateRtcConnectionStatus();
+    updateRtcConnectionStatus(dataChannelsRef);
   };
   
   dataChannel.onmessage = (event) => {
@@ -548,11 +578,17 @@ export const setupDataChannel = (
       const data = JSON.parse(event.data);
       
       if (data.type === 'text_update') {
-        console.log(`Received text update from ${peerId}, length: ${data.text.length}`);
-        handleTextUpdateFromPeer(data.text);
+        console.log(`Received text update from ${peerId}, length: ${data.text.length}, timestamp: ${data.timestamp || 'none'}`);
         
-        // Forward the update to all other peers (mesh network)
-        forwardTextUpdateToOtherPeers(peerId, data.text);
+        // Pass the timestamp if it exists
+        const timestamp = data.timestamp || Date.now();
+        handleTextUpdateFromPeer(data.text, undefined, undefined, undefined, undefined, undefined, undefined, timestamp);
+        
+        // Forward the update to all other peers (mesh network) if the function is provided
+        if (forwardTextUpdateToOtherPeers) {
+          // Forward with the same timestamp to maintain ordering
+          forwardTextUpdateToOtherPeers(peerId, data.text, undefined, undefined, timestamp);
+        }
       }
     } catch (error) {
       console.error('Error processing message:', error);

@@ -98,6 +98,11 @@ function TextShareApp() {
   const peerConnectionsRef = useRef({});
   const dataChannelsRef = useRef({});
   const isTypingRef = useRef(false);
+  const lastSentTextRef = useRef('');
+  const lastReceivedTextRef = useRef('');
+  const pendingTextUpdatesRef = useRef(null);
+  const lastUpdateTimestampRef = useRef(0);
+  const lastReceivedTimestampRef = useRef(0);
   
   // Connection status logger - helps monitor WebRTC status
   const connectionLoggerRef = useRef(null);
@@ -128,9 +133,6 @@ function TextShareApp() {
     // Schedule next log
     connectionLoggerRef.current = setTimeout(logConnectionStatus, 30000); // Log every 30 seconds
   };
-  const pendingTextUpdatesRef = useRef(null);
-  const lastSentTextRef = useRef('');
-  const lastReceivedTextRef = useRef('');
   
   // Remove local theme state in favor of context
   const { isDark } = useTheme();
@@ -924,9 +926,9 @@ function TextShareApp() {
       setPeerConnections,
       setConnectionStatus,
       setConnectedPeers,
-      handlePeerDisconnect,
+      handlePeerDisconnectWrapper, // Use wrapper function
       setupDataChannel,
-      updateRtcConnectionStatus,
+      updateRtcConnectionStatusWrapper, // Use wrapper function
       sendSignal,
       text
     );
@@ -945,7 +947,7 @@ function TextShareApp() {
       // When connected, send current text to peer
       if (text) {
         console.log(`Sending initial text to peer ${peerId}`);
-        sendTextToPeer(peerId, text);
+        sendTextToPeerWrapper(peerId, text);
       }
       
       // Announce the connection to help complete the mesh network
@@ -963,11 +965,11 @@ function TextShareApp() {
         const data = JSON.parse(event.data);
         
         if (data.type === 'text_update') {
-          console.log(`Received text update from ${peerId}, length: ${data.text.length}`);
-          handleTextUpdateFromPeerWrapper(data.text);
+          console.log(`Received text update from ${peerId}, length: ${data.text.length}, timestamp: ${data.timestamp || 0}`);
+          handleTextUpdateFromPeerWrapper(data.text, data.timestamp || 0);
           
           // Forward the update to all other peers (mesh network)
-          forwardTextUpdateToOtherPeers(peerId, data.text);
+          forwardTextUpdateToOtherPeersWrapper(peerId, data.text, data.timestamp);
         }
       } catch (error) {
         console.error('Error processing message:', error);
@@ -992,7 +994,8 @@ function TextShareApp() {
         try {
           dataChannel.send(JSON.stringify({
             type: 'text_update',
-            text: textToForward
+            text: textToForward,
+            timestamp: timestamp || Date.now()
           }));
           forwardedToPeers.push(peerId);
         } catch (err) {
@@ -1006,6 +1009,17 @@ function TextShareApp() {
       // Update our last sent text reference
       lastSentTextRef.current = textToForward;
     }
+  };
+
+  // Create a wrapper for forwardTextUpdateToOtherPeers
+  const forwardTextUpdateToOtherPeersWrapper = (fromPeerId, textToForward, timestamp = Date.now()) => {
+    forwardTextUpdateToOtherPeers(
+      fromPeerId, 
+      textToForward, 
+      lastSentTextRef, 
+      dataChannelsRef, 
+      timestamp
+    );
   };
   
   const handlePeerDisconnectWrapper = (peerId) => {
@@ -1052,13 +1066,17 @@ function TextShareApp() {
     const sentToPeers = [];
     const failedPeers = [];
     
+    // Create a single timestamp for this broadcast to ensure consistency
+    const timestamp = Date.now();
+    
     for (const peerId in dataChannelsRef.current) {
       const dataChannel = dataChannelsRef.current[peerId];
       if (dataChannel && dataChannel.readyState === 'open') {
         try {
           dataChannel.send(JSON.stringify({
             type: 'text_update',
-            text: textToSend
+            text: textToSend,
+            timestamp: timestamp
           }));
           successCount++;
           sentToPeers.push(peerId);
@@ -1134,7 +1152,7 @@ function TextShareApp() {
   };
   
   // Wrapper function to call the imported handleTextUpdateFromPeer from WebRTCUtils with all required parameters
-  const handleTextUpdateFromPeerWrapper = (newText) => {
+  const handleTextUpdateFromPeerWrapper = (newText, timestamp = 0) => {
     // Use the imported utility function with all the needed parameters
     handleTextUpdateFromPeer(
       newText,
@@ -1143,7 +1161,9 @@ function TextShareApp() {
       pendingTextUpdatesRef,
       setText,
       setSavedText,
-      setHasChanges
+      setHasChanges,
+      timestamp,
+      lastReceivedTimestampRef
     );
   };
   
@@ -1709,8 +1729,10 @@ function TextShareApp() {
             className={`save-button ${hasChanges ? 'has-changes' : ''}`} 
             onClick={saveText}
             disabled={!hasChanges}
+            title={activeUsers > 1 ? "Save the current state to the server permanently" : "Save your changes to the server"}
           >
-            <FontAwesomeIcon icon={faSave} className="button-icon" /> Save Changes
+            <FontAwesomeIcon icon={faSave} className="button-icon" /> 
+            {activeUsers > 1 ? "Save Permanently" : "Save Changes"}
           </button>
           
           <button 
@@ -1727,16 +1749,6 @@ function TextShareApp() {
           >
             <FontAwesomeIcon icon={faShare} className="button-icon" /> Share
           </button>
-          
-          {isRtcConnected && (
-            <button 
-              className="save-permanently-button"
-              onClick={saveText}
-              title="Save the current state to the server permanently"
-            >
-              <FontAwesomeIcon icon={faSave} className="button-icon" /> Save Permanently
-            </button>
-          )}
         </div>
         
         <div className="status">
@@ -1962,7 +1974,7 @@ function Home() {
         <ul>
           <li>Click the button above to start a new sharing session</li>
           <li>Share the generated URL or scan the QR code with anyone you want to collaborate with</li>
-          <li>Type your text and click the "Save Changes" button when you're ready to share it</li>
+          <li>Type your text and click the "Save" button when you're ready to share it</li>
           <li>You'll be notified when updates are available from other users</li>
           <li>Choose when to apply updates so your typing won't be interrupted</li>
         </ul>
