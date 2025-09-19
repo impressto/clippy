@@ -69,6 +69,8 @@ export const useWebRTCManager = (
   const lastReceivedTextRef = useRef('');
   const lastServerTextRef = useRef('');
   const pendingTextUpdatesRef = useRef(null);
+  // Store pending ICE candidates that arrive before remote description is set
+  const pendingIceCandidatesRef = useRef({});
   
   // Initialize client ID on component mount
   useEffect(() => {
@@ -131,7 +133,10 @@ export const useWebRTCManager = (
       };
     });
     setDataChannelStatus(channelStatus);
-  }, []);
+    
+    // Update active user count based on WebRTC connections
+    updateActiveUserCount();
+  }, [updateActiveUserCount]);
   
   // Check the connection status with a peer and attempt to reconnect if needed
   const checkPeerConnectionStatus = useCallback((peerId) => {
@@ -388,6 +393,23 @@ export const useWebRTCManager = (
       // Set remote description from offer
       await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
       
+      // Apply any pending ICE candidates
+      const pendingCandidates = pendingIceCandidatesRef.current[peerId];
+      if (pendingCandidates && pendingCandidates.length > 0) {
+        console.log(`Applying ${pendingCandidates.length} buffered ICE candidates for ${peerId}`);
+        
+        for (const candidate of pendingCandidates) {
+          try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (err) {
+            console.warn(`Error applying buffered ICE candidate: ${err.message}`);
+          }
+        }
+        
+        // Clear the buffer
+        pendingIceCandidatesRef.current[peerId] = [];
+      }
+      
       // Create and send answer
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
@@ -413,6 +435,23 @@ export const useWebRTCManager = (
       }
       
       await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+      
+      // Apply any pending ICE candidates now that remote description is set
+      const pendingCandidates = pendingIceCandidatesRef.current[peerId];
+      if (pendingCandidates && pendingCandidates.length > 0) {
+        console.log(`Applying ${pendingCandidates.length} buffered ICE candidates for ${peerId}`);
+        
+        for (const candidate of pendingCandidates) {
+          try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (err) {
+            console.warn(`Error applying buffered ICE candidate: ${err.message}`);
+          }
+        }
+        
+        // Clear the buffer
+        pendingIceCandidatesRef.current[peerId] = [];
+      }
     } catch (error) {
       console.error(`Error handling answer from ${peerId}:`, error);
     }
@@ -427,7 +466,18 @@ export const useWebRTCManager = (
         return;
       }
       
-      await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      // Check if remote description is set
+      if (peerConnection.remoteDescription === null) {
+        // Buffer the candidate for later
+        console.log(`Remote description not set yet for ${peerId}, buffering ICE candidate`);
+        if (!pendingIceCandidatesRef.current[peerId]) {
+          pendingIceCandidatesRef.current[peerId] = [];
+        }
+        pendingIceCandidatesRef.current[peerId].push(signal.candidate);
+      } else {
+        // Add the candidate immediately
+        await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      }
     } catch (error) {
       console.error(`Error handling ICE candidate from ${peerId}:`, error);
     }
@@ -447,6 +497,11 @@ export const useWebRTCManager = (
     if (peerConnectionsRef.current[peerId]) {
       peerConnectionsRef.current[peerId].close();
       delete peerConnectionsRef.current[peerId];
+    }
+    
+    // Clean up any buffered ICE candidates
+    if (pendingIceCandidatesRef.current[peerId]) {
+      delete pendingIceCandidatesRef.current[peerId];
     }
     
     // Update connection status
@@ -659,16 +714,16 @@ export const useWebRTCManager = (
       }
     }
     
-    // If we have fewer successful sends than expected active peers, announce presence
-    if (activeUsers > 2 && successCount < activeUsers - 1) {
-      console.warn(`Only sent to ${successCount} peers but ${activeUsers} users are active. Reconnecting...`);
+    // If we have failed sends, try to reconnect
+    if (failedPeers.length > 0) {
+      console.warn(`Failed to send to ${failedPeers.length} peers. Attempting to reconnect...`);
       // Try to establish connections with missing peers
       sendPresenceAnnouncement(true);
     }
     
     console.log(`Successfully sent text to ${successCount} peers: ${sentToPeers.join(', ')}`);
     lastSentTextRef.current = textToSend;
-  }, [activeUsers, checkPeerConnectionStatus]);
+  }, [checkPeerConnectionStatus]);
   
   // Handle text update from peer
   const handleTextUpdateFromPeer = useCallback((newText) => {
@@ -748,6 +803,7 @@ export const useWebRTCManager = (
       const headers = new Headers();
       headers.append('X-Client-ID', clientIdRef.current);
       
+      // We're only interested in the clientList for peer discovery, not the activeUsers count
       const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=ping`, {
         headers
       });
@@ -755,7 +811,7 @@ export const useWebRTCManager = (
       const data = await response.json();
       
       if (data.status === 'success' && data.clientList && Array.isArray(data.clientList)) {
-        console.log(`Found ${data.clientList.length} active clients in session`);
+        console.log(`Found ${data.clientList.length} potential peers in session (from server)`);
         
         // First, check our current connections
         const currentPeers = Object.keys(peerConnectionsRef.current);
@@ -764,13 +820,6 @@ export const useWebRTCManager = (
         );
         
         console.log(`Current peer connections: ${currentPeers.length}, open data channels: ${connectedDataChannels.length}`);
-        
-        // IMPORTANT: Update active users count based on the server response
-        // This ensures our UI updates correctly
-        if (data.clientList.length !== activeUsers) {
-          console.log(`Updating active users from ${activeUsers} to ${data.clientList.length}`);
-          setActiveUsers(data.clientList.length);
-        }
         
         // Send hello signal to each client except ourselves
         for (const otherClientId of data.clientList) {
@@ -828,41 +877,26 @@ export const useWebRTCManager = (
     } catch (error) {
       console.error('Error sending presence announcement:', error);
     }
-  }, [id, activeUsers, sendSignal, handlePeerDisconnect, updateRtcConnectionStatus]);
+  }, [id, sendSignal, handlePeerDisconnect, updateRtcConnectionStatus]);
   
-  // Function to ping the server for active users
-  const pingActiveUsers = useCallback(async () => {
-    if (!id || !clientIdRef.current) return;
+  // Function to update active user count based on WebRTC connections
+  // This replaces the server-based activeUsers count with a more accurate
+  // count derived directly from established WebRTC connections
+  const updateActiveUserCount = useCallback(() => {
+    // Count number of connected peers plus this client
+    const connectedPeers = Object.keys(dataChannelsRef.current).filter(
+      peerId => dataChannelsRef.current[peerId].readyState === 'open'
+    ).length;
     
-    // Apply rate limiting for pings
-    if (isRateLimited('ping', 15000)) {
-      return;
-    }
+    // Add 1 for the current user
+    const totalUsers = connectedPeers + 1;
     
-    try {
-      const headers = new Headers();
-      headers.append('X-Client-ID', clientIdRef.current);
-      
-      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=ping`, {
-        headers
-      });
-      
-      const data = await response.json();
-      
-      if (data.status === 'success' && data.clientList && Array.isArray(data.clientList)) {
-        // Update active users count
-        setActiveUsers(data.clientList.length);
-        
-        // If we have multiple clients but no peer connections, announce presence
-        if (data.clientList.length > 1 && Object.keys(dataChannelsRef.current).length === 0) {
-          console.log('Multiple clients but no peer connections, announcing presence');
-          sendPresenceAnnouncement(true);
-        }
-      }
-    } catch (error) {
-      console.error('Error pinging active users:', error);
+    // Update active users count if different
+    if (totalUsers !== activeUsers) {
+      console.log(`Updating active users count from ${activeUsers} to ${totalUsers} (based on WebRTC connections)`);
+      setActiveUsers(totalUsers);
     }
-  }, [id, sendPresenceAnnouncement]);
+  }, [activeUsers]);
   
   // Fetch debug data from the server
   const fetchDebugData = useCallback(async () => {
@@ -898,9 +932,6 @@ export const useWebRTCManager = (
     // Set up interval for polling signals
     const pollInterval = setInterval(pollSignals, 2000);
     
-    // Set up interval for checking active users
-    const pingInterval = setInterval(pingActiveUsers, 15000);
-    
     // Set up interval for debugging data
     const debugInterval = debugMode ? setInterval(fetchDebugData, 5000) : null;
     
@@ -909,12 +940,22 @@ export const useWebRTCManager = (
       sendPresenceAnnouncement();
     }, 1000);
     
+    // Periodically check for peer discovery to ensure connections
+    // This replaces the previous activeUsers polling
+    const discoveryInterval = setInterval(() => {
+      const peerCount = Object.keys(peerConnectionsRef.current).length;
+      if (peerCount === 0) {
+        console.log('No peer connections found, initiating discovery');
+        sendPresenceAnnouncement(true);
+      }
+    }, 30000); // Check every 30 seconds
+    
     return () => {
       clearInterval(pollInterval);
-      clearInterval(pingInterval);
+      clearInterval(discoveryInterval);
       if (debugInterval) clearInterval(debugInterval);
     };
-  }, [id, rtcSupported, debugMode, pollSignals, pingActiveUsers, sendPresenceAnnouncement, fetchDebugData]);
+  }, [id, rtcSupported, debugMode, pollSignals, sendPresenceAnnouncement, fetchDebugData]);
   
   // Handle changes to debug mode
   useEffect(() => {
