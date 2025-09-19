@@ -1650,6 +1650,7 @@ function TextShareApp() {
         lastChecked={lastChecked}
         text={text}
         serverText={serverText}
+        isRtcConnected={isRtcConnected}
       />
       <TextAreaContainer
         showDraft={showDraft}

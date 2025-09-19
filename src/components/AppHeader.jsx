@@ -15,7 +15,8 @@ const AppHeader = ({
   applyUpdates, 
   lastChecked, 
   text, 
-  serverText 
+  serverText,
+  isRtcConnected
 }) => {
   return (
     <div className="app-header">
@@ -25,17 +26,18 @@ const AppHeader = ({
         <ThemeToggle />
       </div>
       
-      <div style={{ display: 'flex', alignItems: 'center' }}>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginRight: '0.75rem' }}>
-          <input 
-            type="checkbox" 
-            checked={autoUpdate} 
-            onChange={e => setAutoUpdate(e.target.checked)} 
-          />
-          <span style={{ fontSize: '0.85rem' }}>Auto-load updates</span>
-        </label>
-      
-        {updatesAvailable ? (
+      {!isRtcConnected && (
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginRight: '0.75rem' }}>
+            <input 
+              type="checkbox" 
+              checked={autoUpdate} 
+              onChange={e => setAutoUpdate(e.target.checked)} 
+            />
+            <span style={{ fontSize: '0.85rem' }}>Auto-load updates</span>
+          </label>
+        
+          {updatesAvailable ? (
           <div className="header-updates">
             <span>New updates available!</span>
             <span style={{ fontStyle: 'italic', opacity: 0.9 }}>Press Enter to load</span>
@@ -67,6 +69,7 @@ const AppHeader = ({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };
