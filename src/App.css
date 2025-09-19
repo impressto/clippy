@@ -135,12 +135,24 @@ body.dark-theme {
   gap: 2px;
 }
 
+.rtc-failed {
+  color: #dc3545;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .dark-theme .rtc-connected {
   color: #4caf50;
 }
 
 .dark-theme .rtc-connecting {
   color: #ffb74d;
+}
+
+.dark-theme .rtc-failed {
+  color: #f87171;
 }
 
 .polling-paused {

@@ -19,8 +19,41 @@ const ControlsBar = ({
   connectedPeers,
   isPollingPaused,
   lastChecked,
-  updatesAvailable
+  updatesAvailable,
+  webRtcConnectionStage
 }) => {
+  // Function to get WebRTC status message based on the connection stage
+  const getRtcStatusMessage = () => {
+    switch(webRtcConnectionStage) {
+      case 'initializing':
+        return '⏳ Initializing WebRTC...';
+      case 'discovering':
+        return '🔍 Discovering peers...';
+      case 'connecting':
+        return '⏳ Establishing WebRTC connection...';
+      case 'partially-connected':
+        return '⚡ Partially connected';
+      case 'fully-connected':
+        return '⚡ WebRTC connected';
+      case 'failed':
+        return '❌ WebRTC connection failed';
+      case 'waiting':
+        return '⏸ Waiting for peers';
+      default:
+        return '⏳ Connecting WebRTC...';
+    }
+  };
+
+  // Function to get the CSS class for the WebRTC status
+  const getRtcStatusClass = () => {
+    if (webRtcConnectionStage === 'fully-connected' || webRtcConnectionStage === 'partially-connected') {
+      return 'rtc-connected';
+    } else if (webRtcConnectionStage === 'failed') {
+      return 'rtc-failed';
+    } else {
+      return 'rtc-connecting';
+    }
+  };
   return (
     <div className="controls-bar">
       <div className="button-group">
@@ -71,12 +104,12 @@ const ControlsBar = ({
         )}
         
         {rtcSupported && isRtcConnected && (
-          <span className="rtc-status">· <span className="rtc-connected">⚡ WebRTC connected</span> <FontAwesomeIcon icon={faUsers} /> ({connectedPeers.length} other client{connectedPeers.length !== 1 ? 's' : ''}){isPollingPaused && <span className="polling-paused"> · Server polling paused</span>}</span>
+          <span className="rtc-status">· <span className={getRtcStatusClass()}>{getRtcStatusMessage()}</span> <FontAwesomeIcon icon={faUsers} /> ({connectedPeers.length} other client{connectedPeers.length !== 1 ? 's' : ''}){isPollingPaused && <span className="polling-paused"> · Server polling paused</span>}</span>
         )}
         {rtcSupported && activeUsers > 1 && !isRtcConnected && (
-          <span className="rtc-status">· <span className="rtc-connecting">⏳ Connecting WebRTC...</span></span>
+          <span className="rtc-status">· <span className={getRtcStatusClass()}>{getRtcStatusMessage()}</span></span>
         )}
-        {lastChecked && (
+        {lastChecked && !isRtcConnected && (
           <span className="last-checked"> · Last checked: {lastChecked.toLocaleTimeString()}{!updatesAvailable && ' (no updates)'}</span>
         )}
       </div>

@@ -100,6 +100,7 @@ function TextShareApp() {
   const [isRtcConnected, setIsRtcConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState({});
   const [isPollingPaused, setIsPollingPaused] = useState(false);
+  const [webRtcConnectionStage, setWebRtcConnectionStage] = useState('initializing'); // New state for detailed connection progress
   const peerConnectionsRef = useRef({});
   const dataChannelsRef = useRef({});
   const isTypingRef = useRef(false);
@@ -331,6 +332,9 @@ function TextShareApp() {
       const response = await fetch(`${API_BASE_URL}/share.php?id=${id}`);
       const data = await response.json();
       
+      // Add a small delay between API calls to avoid overloading the server
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
       // Also get the status data to store the initial checksum
       const statusResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&status=1`);
       const statusData = await statusResponse.json();
@@ -345,6 +349,8 @@ function TextShareApp() {
       // Check if we have seed text and the server returned empty text
       if (seedText && (!data.text || data.text.trim() === '')) {
         
+        // Add a small delay between API calls to avoid overloading the server
+        await new Promise(resolve => setTimeout(resolve, 200));
         
         // Save the seed text to server
         await fetch(`${API_BASE_URL}/share.php?id=${id}`, {
@@ -401,6 +407,9 @@ function TextShareApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: textToSave }),
       });
+      
+      // Add a small delay between API calls to avoid overloading the server
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // After saving, get the new checksum for this content
       const statusResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&status=1`);
@@ -473,6 +482,8 @@ function TextShareApp() {
           
           if (hasChanged) {
             
+            // Add a small delay between API calls to avoid overloading the server
+            await new Promise(resolve => setTimeout(resolve, 200));
             
             // Only fetch the full content if the status check indicates changes
             const contentResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&t=${cacheBreaker}`);
@@ -1114,6 +1125,40 @@ function TextShareApp() {
   
   // Function to update the overall WebRTC connection status
   const updateRtcConnectionStatusWrapper = () => {
+    // Count connected peers with open data channels
+    let connectedCount = 0;
+    let connectingCount = 0;
+    let failedCount = 0;
+    
+    for (const peerId in dataChannelsRef.current) {
+      if (dataChannelsRef.current[peerId].readyState === 'open') {
+        connectedCount++;
+      } else if (dataChannelsRef.current[peerId].readyState === 'connecting') {
+        connectingCount++;
+      } else if (dataChannelsRef.current[peerId].readyState === 'closing' || 
+                dataChannelsRef.current[peerId].readyState === 'closed') {
+        failedCount++;
+      }
+    }
+    
+    // Get expected peer count
+    const expectedPeerCount = Math.max(0, activeUsers - 1);
+    
+    // Determine connection stage based on counts
+    if (connectedCount === 0 && connectingCount === 0 && expectedPeerCount > 0) {
+      setWebRtcConnectionStage('discovering');
+    } else if (connectedCount === 0 && connectingCount > 0) {
+      setWebRtcConnectionStage('connecting');
+    } else if (connectedCount > 0 && connectedCount < expectedPeerCount) {
+      setWebRtcConnectionStage('partially-connected');
+    } else if (connectedCount >= expectedPeerCount && expectedPeerCount > 0) {
+      setWebRtcConnectionStage('fully-connected');
+    } else if (failedCount > 0 && connectedCount === 0) {
+      setWebRtcConnectionStage('failed');
+    } else {
+      setWebRtcConnectionStage('waiting');
+    }
+    
     // Use the imported utility function with all the needed parameters
     updateRtcConnectionStatus(
       dataChannelsRef,
@@ -1558,6 +1603,9 @@ function TextShareApp() {
       const idData = await idResponse.json();
       
       if (idData.id) {
+        // Add a small delay between API calls to avoid overloading the server
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
         // Save the current text to the new ID
         await fetch(`${API_BASE_URL}/share.php?id=${idData.id}`, {
           method: 'POST',
@@ -1596,6 +1644,9 @@ function TextShareApp() {
       
       
       if (hasChanged) {
+        // Add a small delay between API calls to avoid overloading the server
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
         // Only fetch the full content if the status check indicates changes
         const contentResponse = await fetch(`${API_BASE_URL}/share.php?id=${id}&t=${cacheBreaker}`);
         const contentData = await contentResponse.json();
@@ -1723,6 +1774,7 @@ function TextShareApp() {
         isPollingPaused={isPollingPaused}
         lastChecked={lastChecked}
         updatesAvailable={updatesAvailable}
+        webRtcConnectionStage={webRtcConnectionStage}
       />
       
       <ShareModal
