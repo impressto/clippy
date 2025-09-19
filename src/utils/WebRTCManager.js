@@ -73,6 +73,7 @@ export const useWebRTCManager = (
   const lastReceivedTextRef = useRef('');
   const lastServerTextRef = useRef('');
   const pendingTextUpdatesRef = useRef(null);
+  const peerDiscoveryEnabledRef = useRef(false);
   // Store pending ICE candidates that arrive before remote description is set
   const pendingIceCandidatesRef = useRef({});
   
@@ -215,6 +216,12 @@ export const useWebRTCManager = (
   const sendSignal = useCallback(async (targetClientId, signal) => {
     if (!id || !clientIdRef.current) return;
     
+    // Only send signals if peer discovery is enabled
+    if (!peerDiscoveryEnabledRef.current) {
+      console.log('Skipping signal send because peer discovery is disabled');
+      return;
+    }
+    
     try {
       const signalData = {
         from: clientIdRef.current,
@@ -258,6 +265,12 @@ export const useWebRTCManager = (
   // Poll for signals from other clients
   const pollSignals = useCallback(async () => {
     if (!id || !clientIdRef.current) return;
+    
+    // Only poll for signals if peer discovery is enabled
+    if (!peerDiscoveryEnabledRef.current) {
+      console.log('Skipping signal polling because peer discovery is disabled');
+      return;
+    }
     
     // Apply rate limiting for polling
     if (isRateLimited('poll', 2000)) {
@@ -834,6 +847,12 @@ export const useWebRTCManager = (
   const sendPresenceAnnouncement = useCallback(async (force = false) => {
     if (!id || !clientIdRef.current) return;
     
+    // Only send presence announcements if peer discovery is enabled
+    if (!peerDiscoveryEnabledRef.current && !force) {
+      console.log('Skipping presence announcement because peer discovery is disabled');
+      return;
+    }
+    
     // Apply rate limiting for presence announcements, but only if not forced
     if (!force && isRateLimited('presence', 2000)) { // 2000ms for more frequent announcements
       console.log('Rate limited presence announcement, skipping');
@@ -986,14 +1005,16 @@ export const useWebRTCManager = (
   useEffect(() => {
     if (!rtcSupported || !id) return;
     
-    // Set up interval for polling signals
-    const pollInterval = setInterval(pollSignals, 2000);
-    
-    // Set up interval for debugging data
+    // Set up interval for debugging data only
     const debugInterval = debugMode ? setInterval(fetchDebugData, 5000) : null;
     
-    // Initial presence announcement and setup
+    // Only setup WebRTC polling when peer discovery is enabled
     if (peerDiscoveryEnabled) {
+      console.log('Setting up WebRTC polling intervals (peer discovery enabled)');
+      
+      // Set up interval for polling signals - only when peer discovery is enabled
+      const pollInterval = setInterval(pollSignals, 2000);
+      
       // Set the connection stage to discovering
       setWebRtcConnectionStage('discovering');
       
@@ -1018,11 +1039,10 @@ export const useWebRTCManager = (
         if (debugInterval) clearInterval(debugInterval);
       };
     } else {
-      // Only do signal polling but not peer discovery
-      console.log('Peer discovery is disabled, only polling for signals');
+      // No WebRTC polling when peer discovery is disabled
+      console.log('Peer discovery is disabled, no WebRTC polling');
       
       return () => {
-        clearInterval(pollInterval);
         if (debugInterval) clearInterval(debugInterval);
       };
     }
@@ -1034,6 +1054,12 @@ export const useWebRTCManager = (
       fetchDebugData();
     }
   }, [debugMode, fetchDebugData]);
+  
+  // Keep the ref updated when peerDiscoveryEnabled changes
+  useEffect(() => {
+    peerDiscoveryEnabledRef.current = peerDiscoveryEnabled;
+    console.log(`Peer discovery ${peerDiscoveryEnabled ? 'enabled' : 'disabled'}`);
+  }, [peerDiscoveryEnabled]);
   
   // Apply any pending text updates when typing stops
   useEffect(() => {
