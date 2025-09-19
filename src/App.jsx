@@ -572,10 +572,24 @@ function TextShareApp() {
           sendPresenceAnnouncement();
         }
         
-        // Send WebRTC debug logs periodically, but only when not fully connected or randomly
-        if (window.webrtcLogs && window.webrtcLogs.length > 0 && 
-           (!allPeersConnected || (isPollingPausedRef.current ? Math.random() < 0.05 : Math.random() < 0.2))) {
-          sendWebRTCLogs(id, clientIdRef.current);
+        // Send WebRTC debug logs periodically, but with optimized conditions
+        if (window.webrtcLogs && window.webrtcLogs.length > 0) {
+          // When not fully connected, send logs more frequently to help debug
+          if (!allPeersConnected) {
+            sendWebRTCLogs(id, clientIdRef.current);
+          }
+          // When WebRTC is connected and stable, only send logs very rarely
+          else if (isRtcConnected && Math.random() < 0.01) { // 1% chance when everything is good
+            sendWebRTCLogs(id, clientIdRef.current);
+          }
+          // When polling is paused but not via WebRTC, send occasionally
+          else if (isPollingPausedRef.current && Math.random() < 0.05) { // 5% chance when polling paused
+            sendWebRTCLogs(id, clientIdRef.current);
+          }
+          // In all other cases, send with moderate frequency
+          else if (Math.random() < 0.1) { // 10% chance in normal operation
+            sendWebRTCLogs(id, clientIdRef.current);
+          }
         }
       }
     }, 15000); // 15 second interval with rate limiting
@@ -1356,6 +1370,18 @@ function TextShareApp() {
     const connectedPeersCount = Object.keys(dataChannelsRef.current).filter(
       peerId => dataChannelsRef.current[peerId].readyState === 'open'
     ).length;
+    
+    // If we have a stable WebRTC connection to all peers, we can skip pinging the server
+    // Only ping occasionally to maintain server-side session
+    const allPeersConnected = connectedPeersCount >= activeUsers - 1 && activeUsers > 1;
+    
+    if (isRtcConnected && allPeersConnected) {
+      // If we have all peers connected, only ping the server very rarely (1 in 10 chance)
+      // This keeps the server-side session alive while avoiding unnecessary traffic
+      if (Math.random() > 0.1) {
+        return; // Skip most pings when fully connected via WebRTC
+      }
+    }
     
     // If we have connections to all peers, we can reduce the ping frequency
     const pingInterval = (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) ? 30000 : 5000;
