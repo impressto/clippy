@@ -34,13 +34,15 @@ const ControlsBar = ({
           {activeUsers > 1 ? "Save Permanently" : "Save Changes"}
         </button>
         
-        <button 
-          className="check-updates-button"
-          onClick={manualCheckForUpdates}
-          title="Check for updates now"
-        >
-          <FontAwesomeIcon icon={faSync} className="button-icon" /> Check Updates
-        </button>
+        {!isRtcConnected && (
+          <button 
+            className="check-updates-button"
+            onClick={manualCheckForUpdates}
+            title="Check for updates now"
+          >
+            <FontAwesomeIcon icon={faSync} className="button-icon" /> Check Updates
+          </button>
+        )}
         
         <button 
           className="share-toggle-button"
