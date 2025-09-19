@@ -1622,9 +1622,6 @@ function TextShareApp() {
                   · {lastChecked.toLocaleTimeString()}
                 </span>
               )}
-              <span className="active-users" title="Active users in this session">
-                · <FontAwesomeIcon icon={faUsers} /> {activeUsers}
-              </span>
             </div>
           ) : lastChecked && (
             <div className="header-status">
@@ -1637,9 +1634,6 @@ function TextShareApp() {
                 )}
                 <span className="last-checked">
                   · {lastChecked.toLocaleTimeString()}
-                </span>
-                <span className="active-users" title="Active users in this session">
-                  · <FontAwesomeIcon icon={faUsers} /> {activeUsers}
                 </span>
               </span>
             </div>
@@ -1770,7 +1764,7 @@ function TextShareApp() {
           )}
           
           {rtcSupported && isRtcConnected && (
-            <span className="rtc-status">· <span className="rtc-connected">⚡ WebRTC connected</span> ({connectedPeers.length} peer{connectedPeers.length !== 1 ? 's' : ''})</span>
+            <span className="rtc-status">· <span className="rtc-connected">⚡ WebRTC connected</span> <FontAwesomeIcon icon={faUsers} /> ({connectedPeers.length} other client{connectedPeers.length !== 1 ? 's' : ''})</span>
           )}
           {rtcSupported && activeUsers > 1 && !isRtcConnected && (
             <span className="rtc-status">· <span className="rtc-connecting">⏳ Connecting WebRTC...</span></span>
