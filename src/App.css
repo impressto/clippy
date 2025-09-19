@@ -30,6 +30,11 @@
   color-scheme: dark;
 }
 
+:root.dark-theme .start-button:hover {
+  background-color: #8ca2ff; /* Lighter blue for dark mode with white text */
+  color: white;
+}
+
 #root {
   width: 100%;
   margin: 0 auto;
@@ -288,13 +293,14 @@ body.dark-theme {
   border-radius: 8px;
   font-size: 1.1rem;
   text-decoration: none;
-  transition: background-color 0.2s;
+  transition: all 0.2s;
   display: inline-block;
   font-weight: bold;
 }
 
 .start-button:hover {
-  background-color: var(--accent-color);
+  background-color: #5d7ef2; /* Lighter blue with white text */
+  color: white;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
