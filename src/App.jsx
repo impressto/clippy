@@ -667,6 +667,21 @@ function TextShareApp() {
     return () => clearInterval(interval);
   }, [isPollingPaused]);
   
+  // Effect to pause polling when WebRTC is connected
+  useEffect(() => {
+    // When WebRTC is connected, pause the polling
+    if (isRtcConnected) {
+      console.log('WebRTC connected, pausing server polling');
+      isPollingPausedRef.current = true;
+      setIsPollingPaused(true);
+    } else if (!isRtcConnected && id) {
+      // When WebRTC is disconnected, resume polling if we have an ID
+      console.log('WebRTC disconnected, resuming server polling');
+      isPollingPausedRef.current = false;
+      setIsPollingPaused(false);
+    }
+  }, [isRtcConnected, id]);
+  
   // WebRTC Signaling Functions
   const startWebRTCSignaling = () => {
     console.log("Starting WebRTC signaling with client ID:", clientIdRef.current);
