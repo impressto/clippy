@@ -55,6 +55,10 @@ export const useWebRTCManager = (
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [activeUsers, setActiveUsers] = useState(1);
   const [dataChannelStatus, setDataChannelStatus] = useState({});
+  // Explicit state for peer discovery control - false by default for privacy
+  const [peerDiscoveryEnabled, setPeerDiscoveryEnabled] = useState(false);
+  // More detailed connection stage for UI feedback
+  const [webRtcConnectionStage, setWebRtcConnectionStage] = useState('waiting');
   
   // Debug mode state
   const [debugMode, setDebugMode] = useState(false);
@@ -76,7 +80,7 @@ export const useWebRTCManager = (
   useEffect(() => {
     if (!clientIdRef.current) {
       clientIdRef.current = Math.random().toString(36).substring(2, 10);
-      console.log(`Generated client ID: ${clientIdRef.current}`);
+      console.log(`Generated WebRTCManager client ID: ${clientIdRef.current}`);
     }
     
     // Check if WebRTC is supported
@@ -95,6 +99,9 @@ export const useWebRTCManager = (
     };
   }, []);
   
+  // We've removed auto-enabling of peer discovery
+  // Now the user must explicitly click "Connect to peers" to enable discovery
+  
   // Update typing state ref when the prop changes
   useEffect(() => {
     isTypingRef.current = isTyping;
@@ -106,22 +113,57 @@ export const useWebRTCManager = (
   }, [text]);
   
   // Helper function to update connection status
+  // Function to update active user count based on WebRTC connections
+  // This replaces the server-based activeUsers count with a more accurate
+  // count derived directly from established WebRTC connections
+  const updateActiveUserCount = useCallback(() => {
+    // Count number of connected peers plus this client
+    const connectedPeers = Object.keys(dataChannelsRef.current).filter(
+      peerId => dataChannelsRef.current[peerId].readyState === 'open'
+    ).length;
+    
+    // Add 1 for the current user
+    const totalUsers = connectedPeers + 1;
+    
+    // Update active users count if different
+    if (totalUsers !== activeUsers) {
+      console.log(`Updating active users count from ${activeUsers} to ${totalUsers} (based on WebRTC connections)`);
+      setActiveUsers(totalUsers);
+    }
+  }, [activeUsers]);
+
   const updateRtcConnectionStatus = useCallback(() => {
     const peerCount = Object.keys(peerConnectionsRef.current).length;
     const connectedChannels = Object.values(dataChannelsRef.current).filter(
       channel => channel.readyState === 'open'
     ).length;
     
+    const connectingCount = Object.values(peerConnectionsRef.current).filter(
+      pc => pc.connectionState === 'connecting' || pc.connectionState === 'new'
+    ).length;
+    
+    const failedCount = Object.values(peerConnectionsRef.current).filter(
+      pc => pc.connectionState === 'failed' || pc.connectionState === 'closed'
+    ).length;
+    
     let newStatus = 'disconnected';
     if (connectedChannels > 0) {
       newStatus = 'connected';
-    } else if (peerCount > 0) {
+    } else if (connectingCount > 0) {
       newStatus = 'connecting';
     }
     
-    console.log(`WebRTC status update: ${newStatus}, peers: ${peerCount}, open channels: ${connectedChannels}`);
+    // Update the connection stage for more detailed UI feedback
+    const newConnectionStage = 
+      connectedChannels > 0 ? 'fully-connected' :
+      connectingCount > 0 ? 'connecting' :
+      failedCount > 0 && connectedChannels === 0 ? 'failed' :
+      peerDiscoveryEnabled && peerCount === 0 ? 'discovering' : 'waiting';
+    
+    console.log(`WebRTC status update: ${newStatus}, stage: ${newConnectionStage}, peers: ${peerCount}, open channels: ${connectedChannels}`);
     setRtcConnected(connectedChannels > 0);
     setConnectionStatus(newStatus);
+    setWebRtcConnectionStage(newConnectionStage);
     
     // Update data channel status for debugging
     const channelStatus = {};
@@ -136,7 +178,7 @@ export const useWebRTCManager = (
     
     // Update active user count based on WebRTC connections
     updateActiveUserCount();
-  }, [updateActiveUserCount]);
+  }, [updateActiveUserCount, peerDiscoveryEnabled]);
   
   // Check the connection status with a peer and attempt to reconnect if needed
   const checkPeerConnectionStatus = useCallback((peerId) => {
@@ -183,13 +225,14 @@ export const useWebRTCManager = (
       const headers = new Headers();
       headers.append('Content-Type', 'application/json');
       headers.append('X-Client-ID', clientIdRef.current);
+      headers.append('X-Session-ID', id); // Add session ID header
       if (debugMode) {
         headers.append('X-Debug-Mode', 'true');
       }
       
       console.log(`Sending signal to ${targetClientId}:`, signal.type);
       
-      const response = await fetch(`${API_BASE_URL}/webrtc_signaling.php?id=${id}`, {
+      const response = await fetch(`${API_BASE_URL}/webrtc_signaling.php`, {
         method: 'POST',
         headers,
         body: JSON.stringify(signalData)
@@ -224,11 +267,12 @@ export const useWebRTCManager = (
     try {
       const headers = new Headers();
       headers.append('X-Client-ID', clientIdRef.current);
+      headers.append('X-Session-ID', id); // Add session ID header
       if (debugMode) {
         headers.append('X-Debug-Mode', 'true');
       }
       
-      const response = await fetch(`${API_BASE_URL}/webrtc_signaling.php?id=${id}&poll=true`, {
+      const response = await fetch(`${API_BASE_URL}/webrtc_signaling.php?poll=true`, {
         headers
       });
       
@@ -802,9 +846,10 @@ export const useWebRTCManager = (
       // Get the list of active users to announce to
       const headers = new Headers();
       headers.append('X-Client-ID', clientIdRef.current);
+      headers.append('X-Session-ID', id); // Add session ID header
       
       // We're only interested in the clientList for peer discovery, not the activeUsers count
-      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=ping`, {
+      const response = await fetch(`${API_BASE_URL}/webrtc_discover.php`, {
         headers
       });
       
@@ -878,25 +923,37 @@ export const useWebRTCManager = (
       console.error('Error sending presence announcement:', error);
     }
   }, [id, sendSignal, handlePeerDisconnect, updateRtcConnectionStatus]);
-  
-  // Function to update active user count based on WebRTC connections
-  // This replaces the server-based activeUsers count with a more accurate
-  // count derived directly from established WebRTC connections
-  const updateActiveUserCount = useCallback(() => {
-    // Count number of connected peers plus this client
-    const connectedPeers = Object.keys(dataChannelsRef.current).filter(
-      peerId => dataChannelsRef.current[peerId].readyState === 'open'
-    ).length;
-    
-    // Add 1 for the current user
-    const totalUsers = connectedPeers + 1;
-    
-    // Update active users count if different
-    if (totalUsers !== activeUsers) {
-      console.log(`Updating active users count from ${activeUsers} to ${totalUsers} (based on WebRTC connections)`);
-      setActiveUsers(totalUsers);
+
+  // Function to manually start peer discovery process
+  const startPeerSearch = useCallback(() => {
+    if (!peerDiscoveryEnabled && rtcSupported && clientIdRef.current) {
+      console.log('User initiated WebRTC peer discovery');
+      setPeerDiscoveryEnabled(true);
+      setWebRtcConnectionStage('discovering');
+      
+      // Reset any existing connections for a fresh start
+      Object.keys(peerConnectionsRef.current).forEach(peerId => {
+        handlePeerDisconnect(peerId);
+      });
+      
+      // Force a presence announcement to discover peers
+      sendPresenceAnnouncement(true);
     }
-  }, [activeUsers]);
+  }, [rtcSupported, peerDiscoveryEnabled, handlePeerDisconnect, sendPresenceAnnouncement]);
+  
+  // Function to disconnect from peers and disable peer discovery
+  const disconnectPeers = useCallback(() => {
+    if (peerDiscoveryEnabled) {
+      console.log('User initiated WebRTC peer disconnection');
+      setPeerDiscoveryEnabled(false);
+      setWebRtcConnectionStage('waiting');
+      
+      // Disconnect from all peers
+      Object.keys(peerConnectionsRef.current).forEach(peerId => {
+        handlePeerDisconnect(peerId);
+      });
+    }
+  }, [peerDiscoveryEnabled, handlePeerDisconnect]);
   
   // Fetch debug data from the server
   const fetchDebugData = useCallback(async () => {
@@ -935,27 +992,41 @@ export const useWebRTCManager = (
     // Set up interval for debugging data
     const debugInterval = debugMode ? setInterval(fetchDebugData, 5000) : null;
     
-    // Send initial presence announcement
-    setTimeout(() => {
-      sendPresenceAnnouncement();
-    }, 1000);
-    
-    // Periodically check for peer discovery to ensure connections
-    // This replaces the previous activeUsers polling
-    const discoveryInterval = setInterval(() => {
-      const peerCount = Object.keys(peerConnectionsRef.current).length;
-      if (peerCount === 0) {
-        console.log('No peer connections found, initiating discovery');
+    // Initial presence announcement and setup
+    if (peerDiscoveryEnabled) {
+      // Set the connection stage to discovering
+      setWebRtcConnectionStage('discovering');
+      
+      // Send initial presence announcement
+      setTimeout(() => {
         sendPresenceAnnouncement(true);
-      }
-    }, 30000); // Check every 30 seconds
-    
-    return () => {
-      clearInterval(pollInterval);
-      clearInterval(discoveryInterval);
-      if (debugInterval) clearInterval(debugInterval);
-    };
-  }, [id, rtcSupported, debugMode, pollSignals, sendPresenceAnnouncement, fetchDebugData]);
+      }, 1000);
+      
+      // Periodically check for peer discovery to ensure connections
+      // This replaces the previous activeUsers polling
+      const discoveryInterval = setInterval(() => {
+        const peerCount = Object.keys(peerConnectionsRef.current).length;
+        if (peerCount === 0 && peerDiscoveryEnabled) {
+          console.log('No peer connections found, initiating discovery');
+          sendPresenceAnnouncement(true);
+        }
+      }, 30000); // Check every 30 seconds
+      
+      return () => {
+        clearInterval(pollInterval);
+        clearInterval(discoveryInterval);
+        if (debugInterval) clearInterval(debugInterval);
+      };
+    } else {
+      // Only do signal polling but not peer discovery
+      console.log('Peer discovery is disabled, only polling for signals');
+      
+      return () => {
+        clearInterval(pollInterval);
+        if (debugInterval) clearInterval(debugInterval);
+      };
+    }
+  }, [id, rtcSupported, debugMode, peerDiscoveryEnabled, pollSignals, sendPresenceAnnouncement, fetchDebugData]);
   
   // Handle changes to debug mode
   useEffect(() => {
@@ -992,7 +1063,13 @@ export const useWebRTCManager = (
     broadcastTextToAllPeers,
     sendPresenceAnnouncement,
     setDebugMode,
-    clientId: clientIdRef.current
+    clientId: clientIdRef.current,
+    // New properties
+    webRtcConnectionStage,
+    startPeerSearch,
+    disconnectPeers,
+    peerDiscoveryEnabled,
+    setPeerDiscoveryEnabled
   };
 };
 

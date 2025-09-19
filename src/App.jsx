@@ -33,6 +33,7 @@ import {
   forwardTextUpdateToOtherPeers,
   createPeerConnection
 } from './utils/WebRTCUtils.js';
+import { useWebRTCManager } from './utils/WebRTCManager.js';
 import { canCallEndpoint } from './utils/RateLimiter.js';
 import { enableWebRTCDebug, sendWebRTCLogs } from './utils/WebRTCDebug.js';
 
@@ -95,14 +96,11 @@ function TextShareApp() {
   const [activeUsers, setActiveUsers] = useState(1); // Start with yourself
   const clientIdRef = useRef(null);
   
-  // WebRTC related state
+  // WebRTC related state - Legacy variables kept for compatibility
   const [peerConnections, setPeerConnections] = useState({});
   const [connectedPeers, setConnectedPeers] = useState([]);
-  const [rtcSupported, setRtcSupported] = useState(false);
-  const [isRtcConnected, setIsRtcConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState({});
   const [isPollingPaused, setIsPollingPaused] = useState(false);
-  const [webRtcConnectionStage, setWebRtcConnectionStage] = useState('initializing'); // New state for detailed connection progress
   const peerConnectionsRef = useRef({});
   const dataChannelsRef = useRef({});
   const isTypingRef = useRef(false);
@@ -111,6 +109,29 @@ function TextShareApp() {
   const pendingTextUpdatesRef = useRef(null);
   const lastUpdateTimestampRef = useRef(0);
   const lastReceivedTimestampRef = useRef(0);
+  
+  // Use our new WebRTCManager hook
+  const {
+    rtcSupported,
+    rtcConnected: isRtcConnected,
+    connectionStatus: rtcStatus,
+    activeUsers: webRtcActiveUsers,
+    webRtcConnectionStage,
+    startPeerSearch,
+    disconnectPeers,
+    peerDiscoveryEnabled,
+    broadcastTextToAllPeers: broadcastText,
+    sendPresenceAnnouncement: webRtcSendPresence // Renamed to avoid conflicts
+  } = useWebRTCManager(
+    id,
+    text,
+    setText,
+    setSavedText,
+    setServerText,
+    setLastServerText,
+    setHasChanges,
+    isTypingRef.current
+  );
   
   // Connection status logger - helps monitor WebRTC status
   const connectionLoggerRef = useRef(null);
@@ -631,10 +652,9 @@ function TextShareApp() {
       console.log("Generated client ID:", clientIdRef.current);
     }
     
-    // Check if WebRTC is supported
+    // Check if WebRTC is supported - no need to set rtcSupported as it comes from the hook
     if (window.RTCPeerConnection && window.RTCSessionDescription) {
       console.log("WebRTC is supported in this browser");
-      setRtcSupported(true);
       
       // Enable WebRTC debugging
       enableWebRTCDebug();
@@ -1125,49 +1145,11 @@ function TextShareApp() {
     );
   };
   
-  // Function to update the overall WebRTC connection status
+  // Function to update the overall WebRTC connection status (legacy)
+  // Now just a no-op since we're using the WebRTCManager hook
   const updateRtcConnectionStatusWrapper = () => {
-    // Count connected peers with open data channels
-    let connectedCount = 0;
-    let connectingCount = 0;
-    let failedCount = 0;
-    
-    for (const peerId in dataChannelsRef.current) {
-      if (dataChannelsRef.current[peerId].readyState === 'open') {
-        connectedCount++;
-      } else if (dataChannelsRef.current[peerId].readyState === 'connecting') {
-        connectingCount++;
-      } else if (dataChannelsRef.current[peerId].readyState === 'closing' || 
-                dataChannelsRef.current[peerId].readyState === 'closed') {
-        failedCount++;
-      }
-    }
-    
-    // Get expected peer count
-    const expectedPeerCount = Math.max(0, activeUsers - 1);
-    
-    // Determine connection stage based on counts
-    if (connectedCount === 0 && connectingCount === 0 && expectedPeerCount > 0) {
-      setWebRtcConnectionStage('discovering');
-    } else if (connectedCount === 0 && connectingCount > 0) {
-      setWebRtcConnectionStage('connecting');
-    } else if (connectedCount > 0 && connectedCount < expectedPeerCount) {
-      setWebRtcConnectionStage('partially-connected');
-    } else if (connectedCount >= expectedPeerCount && expectedPeerCount > 0) {
-      setWebRtcConnectionStage('fully-connected');
-    } else if (failedCount > 0 && connectedCount === 0) {
-      setWebRtcConnectionStage('failed');
-    } else {
-      setWebRtcConnectionStage('waiting');
-    }
-    
-    // Use the imported utility function with all the needed parameters
-    updateRtcConnectionStatus(
-      dataChannelsRef,
-      activeUsers,
-      setIsRtcConnected,
-      sendPresenceAnnouncement
-    );
+    // This is now a no-op function - WebRTCManager hook handles connection status updates
+    console.log('Legacy updateRtcConnectionStatusWrapper called - WebRTCManager hook should handle this now');
   };
   
   const sendTextToPeerWrapper = (peerId, textToSend) => {
@@ -1397,8 +1379,8 @@ function TextShareApp() {
           }
         }
         
-        // Update overall WebRTC connection status
-        updateRtcConnectionStatusWrapper();
+        // WebRTCManager hook handles connection status updates internally
+        // No need to call updateRtcConnectionStatusWrapper anymore
       } else {
         // If server doesn't provide client list, fall back to broadcast
         console.log('Server did not provide client list, using broadcast');
@@ -1765,7 +1747,7 @@ function TextShareApp() {
       <ControlsBar
         hasChanges={hasChanges}
         saveText={saveText}
-        activeUsers={activeUsers}
+        activeUsers={webRtcActiveUsers || activeUsers}
         manualCheckForUpdates={manualCheckForUpdates}
         setShowShareModal={setShowShareModal}
         status={status}
@@ -1777,6 +1759,9 @@ function TextShareApp() {
         lastChecked={lastChecked}
         updatesAvailable={updatesAvailable}
         webRtcConnectionStage={webRtcConnectionStage}
+        startPeerSearch={startPeerSearch}
+        disconnectPeers={disconnectPeers}
+        peerDiscoveryEnabled={peerDiscoveryEnabled}
       />
       
       <ShareModal

@@ -57,8 +57,10 @@ if (!preg_match('/^[a-f0-9]+$/', $sessionId)) {
     exit;
 }
 
-// Validate client ID format
-if (!preg_match('/^client-[0-9]+-[a-z0-9]+$/', $clientId)) {
+// Validate client ID format - accept both formats:
+// 1. client-timestamp-random (from App.jsx)
+// 2. random only (from WebRTCManager.js)
+if (!preg_match('/^(client-[0-9]+-[a-z0-9]+|[a-z0-9]+)$/', $clientId)) {
     echo json_encode(['error' => 'Invalid client ID format']);
     exit;
 }
@@ -117,8 +119,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($target === 'all') {
         $broadcastToAll = true;
     } else {
-        // Validate target format
-        if (!preg_match('/^client-[0-9]+-[a-z0-9]+$/', $target)) {
+        // Validate target format - accept both formats:
+        // 1. client-timestamp-random (from App.jsx)
+        // 2. random only (from WebRTCManager.js)
+        if (!preg_match('/^(client-[0-9]+-[a-z0-9]+|[a-z0-9]+)$/', $target)) {
             echo json_encode(['error' => 'Invalid target format']);
             exit;
         }
@@ -153,13 +157,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         
+        // Debug logging to help diagnose issues
+        error_log("Broadcasting to session: $sessionId");
+        
         // Add the signal to all clients except the sender
         if (isset($activeSessions[$sessionId]) && isset($activeSessions[$sessionId]['clients'])) {
-            foreach (array_keys($activeSessions[$sessionId]['clients']) as $activeClientId) {
+            $activeClientIds = array_keys($activeSessions[$sessionId]['clients']);
+            error_log("Found " . count($activeClientIds) . " active clients in session");
+            
+            foreach ($activeClientIds as $activeClientId) {
                 // Skip sending to self
                 if ($activeClientId === $clientId) {
                     continue;
                 }
+                
+                error_log("Broadcasting signal to client: $activeClientId");
                 
                 // Initialize target if not exists
                 if (!isset($sessionData[$clientId][$activeClientId])) {
