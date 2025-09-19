@@ -294,7 +294,8 @@ body.dark-theme {
 }
 
 .start-button:hover {
-  background-color: var(--secondary-color);
+  background-color: var(--accent-color);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 .loading {
