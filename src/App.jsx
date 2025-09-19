@@ -20,6 +20,8 @@ import AppHeader from './components/AppHeader.jsx';
 import ControlsBar from './components/ControlsBar.jsx';
 import ShareModal from './components/ShareModal.jsx';
 import TextAreaContainer from './components/TextAreaContainer.jsx';
+import ErrorPage from './components/ErrorPage.jsx';
+import HomeContainer from './components/HomeContainer.jsx';
 import { useTheme } from './theme/ThemeContext.jsx';
 import Footer from './components/Footer.jsx';
 import {
@@ -1800,110 +1802,9 @@ function TextShareApp() {
   );
 }
 
-// Home Component
+// Home Component - now just a wrapper for HomeContainer
 function Home() {
-  const [uniqueId, setUniqueId] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const navigate = useNavigate();
-  const { isDark } = useTheme();
-
-  // Generate a unique ID for a new sharing session
-  useEffect(() => {
-    const generateId = async () => {
-      try {
-        setIsLoading(true);
-        const response = await fetch(`${API_BASE_URL}/share.php`);
-        const data = await response.json();
-        if (data.id) {
-          setUniqueId(data.id);
-        }
-      } catch (error) {
-        console.error('Error generating ID:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    generateId();
-  }, []);
-
-  return (
-    <div className="home-container">
-      <div className="app-header">
-        <div className="app-title">
-          <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
-          <h1>Welcome to Clippy</h1>
-          <ThemeToggle />
-        </div>
-      </div>
-      <p className="app-description">
-        Share text between computers securely and easily
-      </p>
-      
-      {isLoading ? (
-        <div className="loading">Generating secure session...</div>
-      ) : (
-        <div className="start-sharing">
-          <Link to={`/share/${uniqueId}`} className="start-button">
-            <FontAwesomeIcon icon={faPlay} className="button-icon" /> Start New Sharing Session
-          </Link>
-        </div>
-      )}
-      
-      <div className="app-info">
-        <h2>How it works</h2>
-        <ul>
-          <li>Click the button above to start a new sharing session</li>
-          <li>Share the generated URL or scan the QR code with anyone you want to collaborate with</li>
-          <li>Type your text and click the "Save" button when you're ready to share it</li>
-          <li>You'll be notified when updates are available from other users</li>
-          <li>Choose when to apply updates so your typing won't be interrupted</li>
-        </ul>
-      </div>
-  <Footer />
-    </div>
-  );
-}
-
-// Error Component
-function ErrorPage() {
-  const location = window.location;
-  const path = location.hash.substring(1); // Remove the # character
-  const shareId = path.match(/\/share\/([^\/]+)/)?.[1]; // Extract ID from path if it exists
-
-  return (
-    <div className="error-container">
-      <div className="app-header">
-        <div className="app-title">
-          <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
-          <h1>Oops!</h1>
-          <ThemeToggle />
-        </div>
-      </div>
-      <p>Sorry, an unexpected error has occurred.</p>
-      <Link to="/" className="home-link">
-        <FontAwesomeIcon icon={faHome} className="button-icon" /> Return to Home
-      </Link>
-      
-      {shareId && (
-        <div className="error-help">
-          <p>It looks like you're trying to access a shared document with ID: <strong>{shareId}</strong></p>
-          <p>Try these links instead:</p>
-          <ul>
-            <li><a href={`/clippy/#/share/${shareId}`}>Direct Link</a></li>
-            <li><a href={`/clippy/index.php?share=${shareId}`}>PHP Link</a></li>
-          </ul>
-        </div>
-      )}
-      
-      {!shareId && (
-        <p className="error-help">
-          If you're trying to access a shared document, make sure the URL is in the correct format.
-        </p>
-      )}
-  <Footer />
-    </div>
-  );
+  return <HomeContainer LOGO_URL={LOGO_URL} API_BASE_URL={API_BASE_URL} />;
 }
 
 // Create router with hash routing
@@ -1911,18 +1812,18 @@ const router = createHashRouter([
   {
     path: '/',
     element: <Home />,
-    errorElement: <ErrorPage />,
+    errorElement: <ErrorPage title="Page Not Found" message="Sorry, the page you're looking for doesn't exist." />,
   },
   {
     path: '/share/:id',
     element: <TextShareApp />,
-    errorElement: <ErrorPage />
+    errorElement: <ErrorPage title="Session Error" message="There was a problem loading the shared session." />
   },
   {
     // Route that handles a seed parameter in the URL hash
     path: '/share/:id/seed/:seedData',
     element: <TextShareApp />,
-    errorElement: <ErrorPage />
+    errorElement: <ErrorPage title="Session Error" message="There was a problem loading the shared session with seed data." />
   }
 ]);
 
