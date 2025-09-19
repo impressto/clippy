@@ -95,6 +95,7 @@ function TextShareApp() {
   const [rtcSupported, setRtcSupported] = useState(false);
   const [isRtcConnected, setIsRtcConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState({});
+  const [isPollingPaused, setIsPollingPaused] = useState(false);
   const peerConnectionsRef = useRef({});
   const dataChannelsRef = useRef({});
   const isTypingRef = useRef(false);
@@ -435,6 +436,12 @@ function TextShareApp() {
     
     // Define a wrapped check function that uses our ref for stable state between calls
     const stableCheckFunction = async () => {
+      // Skip checking for content updates if WebRTC polling is paused
+      if (isPollingPausedRef.current) {
+        setLastChecked(new Date()); // Still update the timestamp so UI shows recent check
+        return;
+      }
+      
       try {
         
         
@@ -529,8 +536,8 @@ function TextShareApp() {
     const interval = setInterval(() => {
       stableCheckFunction();
       
-      // Also ping for active users if we have an ID
-      if (id && clientIdRef.current) {
+      // Also ping for active users if we have an ID and polling isn't paused
+      if (id && clientIdRef.current && !isPollingPausedRef.current) {
         pingActiveUsers();
       }
     }, 10000); // 10 second interval is fine since we have rate limiting
@@ -545,15 +552,25 @@ function TextShareApp() {
         
         const allPeersConnected = connectedPeersCount >= activeUsers - 1;
         
-        // If we're fully connected, we don't need to check as often
-        if (!allPeersConnected || Math.random() < 0.3) { // Only check ~30% of the time when fully connected
-          // Periodically check for new clients we might not be connected to
-          // Rate limiting ensures we don't hit the server too frequently
+        // If polling is paused, only check very rarely for new clients
+        if (isPollingPausedRef.current) {
+          // If polling is paused and we're fully connected, only check 5% of the time
+          if (Math.random() < 0.05) {
+            sendPresenceAnnouncement();
+          }
+        } 
+        // Otherwise, if we're fully connected, check occasionally
+        else if (allPeersConnected && Math.random() < 0.3) {
+          sendPresenceAnnouncement();
+        }
+        // If not fully connected, check more frequently
+        else if (!allPeersConnected) {
           sendPresenceAnnouncement();
         }
         
         // Send WebRTC debug logs periodically, but only when not fully connected or randomly
-        if (window.webrtcLogs && window.webrtcLogs.length > 0 && (!allPeersConnected || Math.random() < 0.2)) {
+        if (window.webrtcLogs && window.webrtcLogs.length > 0 && 
+           (!allPeersConnected || (isPollingPausedRef.current ? Math.random() < 0.05 : Math.random() < 0.2))) {
           sendWebRTCLogs(id, clientIdRef.current);
         }
       }
@@ -635,6 +652,17 @@ function TextShareApp() {
     };
   }, [id]); // Remove rtcSupported from dependency array since we check it inside
   
+  // Effect to sync polling paused ref to state for UI
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (isPollingPausedRef.current !== isPollingPaused) {
+        setIsPollingPaused(isPollingPausedRef.current);
+      }
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [isPollingPaused]);
+  
   // WebRTC Signaling Functions
   const startWebRTCSignaling = () => {
     console.log("Starting WebRTC signaling with client ID:", clientIdRef.current);
@@ -650,6 +678,8 @@ function TextShareApp() {
   const lastSignalTimeRef = useRef(0);
   // Track if we're in active connection mode
   const activeConnectionModeRef = useRef(false);
+  // Track if polling is paused due to complete WebRTC connections
+  const isPollingPausedRef = useRef(false);
   
   const pollForSignals = async () => {
     if (!id || !clientIdRef.current) return;
@@ -662,12 +692,22 @@ function TextShareApp() {
       peerId => dataChannelsRef.current[peerId].readyState === 'open'
     ).length;
     
-    // If we have connections to all peers, we can poll less frequently
-    if (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) {
-      // Keep a much slower polling rate when all peers are connected
-      if (pollIntervalRef.current < 60000) { // If less than 60 seconds
-        pollIntervalRef.current = 60000; // Set to 60 seconds (1 minute)
-        console.log(`All peers connected, using very slow signaling poll rate: ${pollIntervalRef.current}ms`);
+    // If we have connections to all peers, we can pause polling
+    const allPeersConnected = connectedPeersCount >= activeUsers - 1 && activeUsers > 1;
+    
+    if (allPeersConnected) {
+      if (!isPollingPausedRef.current) {
+        console.log(`All peers connected (${connectedPeersCount}/${activeUsers-1}), pausing signaling polling`);
+        isPollingPausedRef.current = true;
+        // Schedule a very infrequent check (once every 2 minutes) to handle potential new peers
+        pollIntervalRef.current = 120000; // 2 minutes
+      }
+    } else {
+      // If we were paused but lost connections, resume normal polling
+      if (isPollingPausedRef.current) {
+        console.log('Not all peers connected, resuming normal polling frequency');
+        isPollingPausedRef.current = false;
+        pollIntervalRef.current = 5000; // Reset to 5 seconds
       }
     }
     
@@ -714,13 +754,16 @@ function TextShareApp() {
           
           // If we have connections to everyone (activeUsers minus ourselves)
           if (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) {
-            // Set a very long poll interval since we don't need signaling anymore
-            // But still keep it running at a slow rate in case new peers join
-            pollIntervalRef.current = Math.min(60000, pollIntervalRef.current * 2); // Up to 1 minute
-            console.log(`All peers connected (${connectedPeersCount}/${activeUsers-1}), reducing signaling poll rate to ${pollIntervalRef.current}ms`);
+            // Set polling to paused state since we don't need signaling anymore
+            // But still keep it running at a very slow rate in case new peers join
+            isPollingPausedRef.current = true;
+            pollIntervalRef.current = 120000; // 2 minutes
+            console.log(`All peers connected (${connectedPeersCount}/${activeUsers-1}), pausing signaling with check every ${pollIntervalRef.current/1000} seconds`);
           } else
           // If we're not in active mode, implement exponential backoff up to 10 seconds
           if (!activeConnectionModeRef.current) {
+            // Not paused since we don't have all connections
+            isPollingPausedRef.current = false;
             // Increase interval with each empty response, max 10s
             pollIntervalRef.current = Math.min(pollIntervalRef.current * 1.5, 10000);
           }
@@ -741,8 +784,9 @@ function TextShareApp() {
       
       // Allow longer backoff intervals when we have full connectivity
       if (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) {
-        pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 60000); // Up to 1 minute on error
-        console.log(`Network error, but all peers connected. Extended backoff to ${pollIntervalRef.current}ms`);
+        isPollingPausedRef.current = true;
+        pollIntervalRef.current = 120000; // 2 minutes on error with all peers connected
+        console.log(`Network error, but all peers connected. Pausing polling with check every ${pollIntervalRef.current/1000} seconds`);
       } else {
         pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 15000); // Up to 15 seconds
       }
@@ -978,7 +1022,7 @@ function TextShareApp() {
   };
   
   // Forward text updates to all peers except the original sender
-  const forwardTextUpdateToOtherPeers = (fromPeerId, textToForward) => {
+  const forwardTextUpdateToOtherPeers = (fromPeerId, textToForward, lastSentTextRef, dataChannelsRef, timestamp) => {
     // Don't forward if it's identical to what we last sent
     if (textToForward === lastSentTextRef.current) return;
     
@@ -1320,6 +1364,9 @@ function TextShareApp() {
           if (data.activeUsers > activeUsers) {
             pollIntervalRef.current = 1000;
             console.log(`New users detected, resetting signaling poll interval to ${pollIntervalRef.current}ms`);
+            
+            // Reset polling paused state when new users are detected
+            isPollingPausedRef.current = false;
             
             // Force an immediate poll to connect with new users
             if (pollingTimeoutRef.current) {
@@ -1764,7 +1811,7 @@ function TextShareApp() {
           )}
           
           {rtcSupported && isRtcConnected && (
-            <span className="rtc-status">· <span className="rtc-connected">⚡ WebRTC connected</span> <FontAwesomeIcon icon={faUsers} /> ({connectedPeers.length} other client{connectedPeers.length !== 1 ? 's' : ''})</span>
+            <span className="rtc-status">· <span className="rtc-connected">⚡ WebRTC connected</span> <FontAwesomeIcon icon={faUsers} /> ({connectedPeers.length} other client{connectedPeers.length !== 1 ? 's' : ''}){isPollingPaused && <span className="polling-paused"> · Server polling paused</span>}</span>
           )}
           {rtcSupported && activeUsers > 1 && !isRtcConnected && (
             <span className="rtc-status">· <span className="rtc-connecting">⏳ Connecting WebRTC...</span></span>

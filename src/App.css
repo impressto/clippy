@@ -143,6 +143,17 @@ body.dark-theme {
   color: #ffb74d;
 }
 
+.polling-paused {
+  color: #6c757d;
+  font-style: italic;
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
+.dark-theme .polling-paused {
+  color: #9e9e9e;
+}
+
 .save-permanently-button {
   background-color: #ff6b2b;
   color: white;
