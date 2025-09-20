@@ -8,6 +8,7 @@ import TextAreaContainer from './components/TextAreaContainer.jsx';
 import ControlsBar from './components/ControlsBar.jsx';
 import Footer from './components/Footer.jsx';
 import ShareModal from './components/ShareModal.jsx';
+import ThemeToggle from './components/ThemeToggle.jsx';
 import { useTheme } from './theme/ThemeContext.jsx';
 import { useWebRTCManager } from './utils/WebRTCSocketManager.js';
 
@@ -68,6 +69,9 @@ function TextShareApp() {
   });
   const [lastChecked, setLastChecked] = useState(null);
   const [updatesAvailable, setUpdatesAvailable] = useState(false);
+  const [draftText, setDraftText] = useState('');
+  const [showDraft, setShowDraft] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
   
   // Refs
   const textAreaRef = useRef(null);
@@ -124,6 +128,15 @@ function TextShareApp() {
   useEffect(() => {
     localStorage.setItem('autoUpdate', autoUpdate.toString());
   }, [autoUpdate]);
+  
+  // Clean up typing detection timer on unmount
+  useEffect(() => {
+    return () => {
+      if (window.userEditingResetTimer) {
+        clearTimeout(window.userEditingResetTimer);
+      }
+    };
+  }, []);
 
   // WebRTC Socket Manager handles all WebRTC signaling now - no polling needed
 
@@ -185,7 +198,19 @@ function TextShareApp() {
   const handleChange = useCallback((e) => {
     const newText = e.target.value;
     
-    // Only process if text has actually changed
+    // Check if we're editing the draft or main text
+    if (showDraft) {
+      // Update draft text
+      setDraftText(newText);
+      
+      // Save draft to localStorage
+      if (id) {
+        localStorage.setItem(`clippy_draft_${id}`, newText);
+      }
+      return;
+    }
+    
+    // Only process if main text has actually changed
     if (newText !== text) {
       // Handle typing indicator
       handleTypingStart();
@@ -206,6 +231,14 @@ function TextShareApp() {
         clearTimeout(savingTimeoutRef.current);
       }
       
+      // Set up a timer to reset userEditingRef after typing stops
+      if (window.userEditingResetTimer) {
+        clearTimeout(window.userEditingResetTimer);
+      }
+      window.userEditingResetTimer = setTimeout(() => {
+        userEditingRef.current = false;
+      }, 3000); // Reset after 3 seconds of no typing
+      
       savingTimeoutRef.current = setTimeout(() => {
         handleSave();
       }, 2000); // Auto-save after 2 seconds of inactivity
@@ -215,7 +248,7 @@ function TextShareApp() {
         sendTextToAllPeers(newText);
       }
     }
-  }, [text, serverText, rtcConnected, sendTextToAllPeers, handleTypingStart]);
+  }, [text, serverText, rtcConnected, sendTextToAllPeers, handleTypingStart, showDraft, setDraftText, id]);
   
   // Handle save operation
   const handleSave = useCallback(async () => {
@@ -375,13 +408,52 @@ function TextShareApp() {
   // Function to apply server updates
   const applyUpdates = useCallback(() => {
     if (serverText !== text) {
+      // If there are unsaved changes, offer to save as draft
+      if (hasChanges && userEditingRef.current) {
+        const saveAsDraft = window.confirm('You have unsaved changes. Would you like to save them as a draft before loading the updates?');
+        
+        if (saveAsDraft) {
+          // Save current text as draft
+          setDraftText(text);
+          setHasDraft(true);
+          
+          // Save to localStorage
+          if (id) {
+            localStorage.setItem(`clippy_draft_${id}`, text);
+          }
+        }
+      }
+      
       console.log('Applying server updates');
       setText(serverText);
       setSavedText(serverText);
       setHasChanges(false);
       setUpdatesAvailable(false);
+      // Reset editing state after applying updates
+      userEditingRef.current = false;
+      
+      // Clear any existing reset timer
+      if (window.userEditingResetTimer) {
+        clearTimeout(window.userEditingResetTimer);
+        window.userEditingResetTimer = null;
+      }
     }
-  }, [serverText, text]);
+  }, [serverText, text, hasChanges, userEditingRef, id]);
+  
+  // Add keyboard event listener for Enter key to apply updates
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Apply updates when Enter key is pressed and updates are available
+      if (e.key === 'Enter' && updatesAvailable) {
+        applyUpdates();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [updatesAvailable, applyUpdates]);
   
   // Initial load effect
   useEffect(() => {
@@ -413,16 +485,20 @@ function TextShareApp() {
         setLastChecked(new Date());
         // Check if there are updates available
         if (serverText && serverText !== text) {
+          console.log('Updates available, autoUpdate:', autoUpdate, 'userEditing:', userEditingRef.current);
           setUpdatesAvailable(true);
           
           // If autoUpdate is enabled, apply the updates immediately
           if (autoUpdate && !userEditingRef.current) {
+            console.log('Auto-applying updates');
             applyUpdates();
+          } else if (autoUpdate && userEditingRef.current) {
+            console.log('Not auto-applying updates because user is editing');
           }
         }
       });
-    }, 5000); // Check every 5 seconds
-    
+    }, 10000); // Check every 10 seconds
+
     return () => clearInterval(checkInterval);
   }, [id, isRtcConnected, autoUpdate, loadTextFromServer, serverText, text, applyUpdates]);
   
@@ -476,6 +552,78 @@ function TextShareApp() {
     setHasChanges(false);
     setLoadedFromServer(false);
   }, [navigate]);
+  
+  // Draft management functions
+  const saveDraft = useCallback(() => {
+    // Save current text as draft
+    setDraftText(text);
+    setHasDraft(true);
+    
+    // Save draft to localStorage for persistence
+    if (id) {
+      localStorage.setItem(`clippy_draft_${id}`, text);
+    }
+    
+    // Show a confirmation message
+    alert('Draft saved. You can access it from the "My Draft" tab.');
+  }, [text, id]);
+  
+  const deleteDraft = useCallback(() => {
+    // Confirm deletion
+    if (window.confirm('Are you sure you want to delete your draft?')) {
+      setDraftText('');
+      setHasDraft(false);
+      setShowDraft(false);
+      
+      // Remove from localStorage
+      if (id) {
+        localStorage.removeItem(`clippy_draft_${id}`);
+      }
+    }
+  }, [id]);
+  
+  // Function to apply draft text to main text
+  const applyDraft = useCallback(() => {
+    console.log('Applying draft text:', draftText);
+    
+    if (draftText && draftText.trim().length > 0) {
+      console.log('Setting text to draft text');
+      
+      // Need to explicitly set text to the draft value
+      setText(draftText);
+      
+      // Update other state
+      setHasChanges(true);  // Always mark as having changes
+      setSavedText(text);   // Store the previous text value
+      setShowDraft(false);  // Switch back to main text view
+      
+      // Also update editing state
+      userEditingRef.current = true;
+      
+      // Reset editing timer
+      if (window.userEditingResetTimer) {
+        clearTimeout(window.userEditingResetTimer);
+      }
+      window.userEditingResetTimer = setTimeout(() => {
+        userEditingRef.current = false;
+      }, 3000);
+      
+      console.log('Draft text applied to main text area');
+    } else {
+      console.log('Cannot apply draft: empty or undefined');
+    }
+  }, [draftText, text, setText, setHasChanges, setSavedText, setShowDraft]);
+  
+  // Load draft from localStorage on initial load
+  useEffect(() => {
+    if (id) {
+      const savedDraft = localStorage.getItem(`clippy_draft_${id}`);
+      if (savedDraft) {
+        setDraftText(savedDraft);
+        setHasDraft(true);
+      }
+    }
+  }, [id]);
   
   // Calculate stats
   const wordCount = text && text.trim() ? text.trim().split(/\s+/).length : 0;
@@ -532,44 +680,58 @@ function TextShareApp() {
   // Render
   return (
     <div className={`app-container ${theme}`}>
-      <AppHeader
-        LOGO_URL={LOGO_URL}
-        onNew={handleNew}
-        showRTCStatus={!!id}
-        rtcStatus={getWebRTCStatusMessage()}
-        rtcConnected={isRtcConnected}
-        rtcStage={rtcStage}
-        onDebugWebRTC={handleDebugWebRTC}
-        onSubmitDebugLogs={handleSubmitDebugLogs}
-        autoUpdate={autoUpdate}
-        setAutoUpdate={setAutoUpdate}
-        updatesAvailable={updatesAvailable}
-        applyUpdates={applyUpdates}
-        lastChecked={lastChecked}
-        text={text}
-        serverText={serverText}
-      />
-      
       {!id ? (
-        <HomeContainer onNewClick={handleNew} API_BASE_URL={API_BASE_URL} LOGO_URL={LOGO_URL} />
+        // Home/Landing page - no session ID
+        <div className="landing-page">
+          <div className="app-header">
+            <div className="app-title">
+              <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
+              <h1>Clippy</h1>
+              <ThemeToggle />
+            </div>
+          </div>
+          
+          <HomeContainer onNewClick={handleNew} API_BASE_URL={API_BASE_URL} LOGO_URL={LOGO_URL} />
+          <Footer />
+        </div>
       ) : (
+        // App with session ID
         <>
+          <AppHeader
+            LOGO_URL={LOGO_URL}
+            onNew={handleNew}
+            showRTCStatus={true}
+            rtcStatus={getWebRTCStatusMessage()}
+            rtcConnected={isRtcConnected}
+            rtcStage={rtcStage}
+            onDebugWebRTC={handleDebugWebRTC}
+            onSubmitDebugLogs={handleSubmitDebugLogs}
+            autoUpdate={autoUpdate}
+            setAutoUpdate={setAutoUpdate}
+            updatesAvailable={updatesAvailable}
+            applyUpdates={applyUpdates}
+            lastChecked={lastChecked}
+            text={text}
+            serverText={serverText}
+          />
+          
           <TextAreaContainer
             text={text}
             handleTextChange={handleChange}
             textAreaRef={textAreaRef}
             rtcStatus={rtcStage}
             isTyping={isTyping}
-            draftText=""
-            showDraft={false}
-            setShowDraft={() => {}}
-            hasDraft={false}
-            deleteDraft={() => {}}
+            draftText={draftText}
+            showDraft={showDraft}
+            setShowDraft={setShowDraft}
+            hasDraft={hasDraft}
+            deleteDraft={deleteDraft}
             setText={setText}
             setHasChanges={setHasChanges}
             savedText={savedText}
-            setStatus={() => {}}
-            saveDraft={() => {}}
+            setStatus={(status) => setHasChanges(status === 'unsaved')}
+            saveDraft={saveDraft}
+            applyDraft={applyDraft}
             MAX_TEXT_LENGTH={MAX_TEXT_LENGTH}
           />
           
@@ -594,18 +756,18 @@ function TextShareApp() {
             isPollingPaused={isRtcPollingPaused}
             status={hasChanges ? "unsaved" : "saved"}
           />
+          
+          <Footer />
+          
+          {showModal && (
+            <ShareModal
+              id={id}
+              onClose={handleCloseModal}
+              rtcSupported={rtcSupported}
+              rtcConnected={isRtcConnected}
+            />
+          )}
         </>
-      )}
-      
-      <Footer />
-      
-      {showModal && (
-        <ShareModal
-          id={id}
-          onClose={handleCloseModal}
-          rtcSupported={rtcSupported}
-          rtcConnected={rtcConnected}
-        />
       )}
     </div>
   );

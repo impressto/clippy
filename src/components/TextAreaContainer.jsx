@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCopy } from '@fortawesome/free-solid-svg-icons';
 
@@ -17,10 +17,33 @@ const TextAreaContainer = ({
   savedText,
   setStatus,
   saveDraft,
+  applyDraft,
   text,
   handleTextChange,
   MAX_TEXT_LENGTH
 }) => {
+  // Log when props change
+  useEffect(() => {
+    console.log('TextAreaContainer: text prop changed:', text);
+  }, [text]);
+  
+  useEffect(() => {
+    console.log('TextAreaContainer: showDraft changed:', showDraft);
+  }, [showDraft]);
+  
+  useEffect(() => {
+    console.log('TextAreaContainer: draftText changed:', draftText);
+  }, [draftText]);
+  
+  const handleUseDraft = () => {
+    console.log('Use Draft button clicked');
+    if (typeof applyDraft === 'function') {
+      applyDraft();
+    } else {
+      console.error('applyDraft is not a function:', applyDraft);
+    }
+  };
+  
   return (
     <div className="text-area-container">
       <div className="text-tabs">
@@ -48,12 +71,7 @@ const TextAreaContainer = ({
             </button>
             <button 
               className="draft-action-button draft-use" 
-              onClick={() => {
-                setText(draftText);
-                setHasChanges(draftText !== savedText);
-                setStatus('unsaved');
-                setShowDraft(false);
-              }}
+              onClick={handleUseDraft}
               title="Use draft as main text"
             >
               Use Draft
