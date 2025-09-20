@@ -80,7 +80,7 @@ const TextAreaContainer = ({
       />
       <div className="textarea-footer">
         <span className="character-count">
-          {(showDraft ? draftText.length : text.length).toLocaleString()} / {MAX_TEXT_LENGTH.toLocaleString()} characters
+          {(showDraft ? (draftText?.length || 0) : (text?.length || 0)).toLocaleString()} / {MAX_TEXT_LENGTH.toLocaleString()} characters
         </span>
       </div>
       <button 

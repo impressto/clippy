@@ -1,6 +1,7 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSave, faSync, faShare, faUsers } from '@fortawesome/free-solid-svg-icons';
+import './ControlsBar.css'; // Import the CSS for WebRTC status styles
 
 /**
  * ControlsBar component displays the main control buttons and status information
@@ -10,7 +11,7 @@ const ControlsBar = ({
   hasChanges,
   saveText,
   activeUsers,
-  manualCheckForUpdates,
+  onRefresh,
   setShowShareModal,
   status,
   lastSaved,
@@ -28,19 +29,19 @@ const ControlsBar = ({
       case 'initializing':
         return '⏳ Initializing WebRTC...';
       case 'discovering':
-        return '🔍 Discovering peers...';
+        return '🔍 Discovering peers';
       case 'connecting':
-        return '⏳ Establishing WebRTC connection...';
+        return '⏳ Connecting';
       case 'partially-connected':
         return '⚡ Partially connected';
       case 'fully-connected':
-        return '⚡ WebRTC connected';
+        return '⚡ Connected via WebRTC';
       case 'failed':
-        return '❌ WebRTC connection failed';
+        return '❌ Connection failed';
       case 'waiting':
         return '⏸ Waiting for peers';
       default:
-        return '⏳ Connecting WebRTC...';
+        return '⏳ WebRTC status: ' + webRtcConnectionStage;
     }
   };
 
@@ -70,10 +71,20 @@ const ControlsBar = ({
         {!isRtcConnected && (
           <button 
             className="check-updates-button"
-            onClick={manualCheckForUpdates}
+            onClick={onRefresh}
             title="Check for updates now"
           >
             <FontAwesomeIcon icon={faSync} className="button-icon" /> Check Updates
+          </button>
+        )}
+        
+        {rtcSupported && !isRtcConnected && (
+          <button 
+            className="connect-peers-button"
+            onClick={() => window.initiatePeerConnections && window.initiatePeerConnections()}
+            title="Connect to peers using WebRTC"
+          >
+            <FontAwesomeIcon icon={faUsers} className="button-icon" /> Connect to Peers
           </button>
         )}
         
@@ -86,6 +97,7 @@ const ControlsBar = ({
       </div>
       
       <div className="status">
+        {/* Document status section */}
         {status === 'saved' ? (
           <>
             <span className="status-saved">✓ Saved</span>
@@ -103,12 +115,36 @@ const ControlsBar = ({
           <span className="status-idle">No changes</span>
         )}
         
+        {/* WebRTC connection status section */}
         {rtcSupported && isRtcConnected && (
-          <span className="rtc-status">· <span className={getRtcStatusClass()}>{getRtcStatusMessage()}</span> <FontAwesomeIcon icon={faUsers} /> ({connectedPeers.length} other client{connectedPeers.length !== 1 ? 's' : ''}){isPollingPaused && <span className="polling-paused"> · Server polling paused</span>}</span>
+          <span className="rtc-status">
+            · <span className={getRtcStatusClass()}>{getRtcStatusMessage()}</span> 
+            <FontAwesomeIcon icon={faUsers} /> 
+            ({connectedPeers.length} other client{connectedPeers.length !== 1 ? 's' : ''})
+            {isPollingPaused && <span className="polling-paused"> · Server polling paused</span>}
+          </span>
         )}
-        {rtcSupported && activeUsers > 1 && !isRtcConnected && (
-          <span className="rtc-status">· <span className={getRtcStatusClass()}>{getRtcStatusMessage()}</span></span>
+        
+        {/* WebRTC connection status when trying to connect */}
+        {rtcSupported && !isRtcConnected && (
+          <span className="rtc-status">
+            · <span className={getRtcStatusClass()}>{getRtcStatusMessage()}</span>
+            {activeUsers > 1 && 
+              <span className="active-users-count"> · {activeUsers} active user{activeUsers !== 1 ? 's' : ''}</span>
+            }
+            {webRtcConnectionStage === 'discovering' && 
+              <span className="discovery-status"> · Looking for peers...</span>
+            }
+            {webRtcConnectionStage === 'connecting' && 
+              <span className="connecting-status"> · Establishing connection...</span>
+            }
+            {webRtcConnectionStage === 'failed' && 
+              <span className="failed-status"> · Try clicking "Connect to Peers" again</span>
+            }
+          </span>
         )}
+        
+        {/* Poll status when WebRTC not connected */}
         {lastChecked && !isRtcConnected && (
           <span className="last-checked"> · Last checked: {lastChecked.toLocaleTimeString()}{!updatesAvailable && ' (no updates)'}</span>
         )}

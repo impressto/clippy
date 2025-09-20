@@ -9,6 +9,7 @@ import ControlsBar from './components/ControlsBar.jsx';
 import Footer from './components/Footer.jsx';
 import ShareModal from './components/ShareModal.jsx';
 import { useTheme } from './theme/ThemeContext.jsx';
+import { enableWebRTCDebug, sendWebRTCLogs } from './utils/WebRTCDebug.js';
 import { useWebRTCManager } from './utils/WebRTCSocketManager.js';
 
 // Constants
@@ -18,9 +19,7 @@ const MAX_TEXT_LENGTH = 20000; // Limit text to 20,000 characters (approx. 20KB)
 const MAX_STORAGE_SIZE = 4 * 1024 * 1024; // 4MB limit for localStorage
 
 // TextShareApp Component
-function TextShareApp() {
-  // Get route parameters
-  const { id, seedData } = useParams();
+function TextShareApp({ id, seedData }) {
   // Helper function to encode text to base64
   const encodeTextToBase64 = (text) => {
     try {
@@ -61,13 +60,6 @@ function TextShareApp() {
   const [isServerOnline, setIsServerOnline] = useState(true);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [socketClients, setSocketClients] = useState(0);
-  const [autoUpdate, setAutoUpdate] = useState(() => {
-    // Load from localStorage if available
-    const saved = localStorage.getItem('autoUpdate');
-    return saved !== null ? saved === 'true' : true;
-  });
-  const [lastChecked, setLastChecked] = useState(null);
-  const [updatesAvailable, setUpdatesAvailable] = useState(false);
   
   // Refs
   const textAreaRef = useRef(null);
@@ -89,9 +81,8 @@ function TextShareApp() {
     rtcSupported,
     rtcConnected,
     connectionStatus,
-    activeUsers,
+    activeUsers: rtcActiveUsers,
     dataChannelStatus,
-    setDebugMode,
     webRtcConnectionStage: rtcStage,
     isPollingPaused: rtcPollingPaused,
     sendTextToAllPeers,
@@ -119,11 +110,6 @@ function TextShareApp() {
       setIsRtcPollingPaused(rtcPollingPaused);
     }
   }, [rtcPollingPaused]);
-  
-  // Save autoUpdate preference
-  useEffect(() => {
-    localStorage.setItem('autoUpdate', autoUpdate.toString());
-  }, [autoUpdate]);
 
   // WebRTC Socket Manager handles all WebRTC signaling now - no polling needed
 
@@ -283,51 +269,31 @@ function TextShareApp() {
   
   // Load text from server
   const loadTextFromServer = useCallback(async () => {
-    if (!id) {
-      console.error('Cannot load text: No session ID provided');
-      console.trace('Stack trace for missing ID');
-      return;
-    }
+    if (!id) return;
     
     try {
-      console.log(`Loading text from server for session ${id}`);
       const headers = new Headers();
-      headers.append('X-Client-ID', clientIdRef.current || 'unknown');
+      headers.append('X-Client-ID', clientIdRef.current);
       
       const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=true`, {
         headers
       });
       
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-      }
+      const data = await response.json();
       
-      let data;
-      try {
-        data = await response.json();
-      } catch (jsonError) {
-        console.error('Error parsing JSON response:', jsonError);
-        console.log('Response text:', await response.text());
-        throw new Error('Invalid JSON response from server');
-      }
-      
-      // Check if response contains text (even if status is not explicitly 'success')
-      if (data && data.text !== undefined) {
+      if (data.status === 'success') {
         console.log('Text loaded from server');
         
-        // Ensure data.text is defined and not null
-        const serverText = data.text || '';
-        
         // Update server text state
-        setServerText(serverText);
-        setLastServerText(serverText);
+        setServerText(data.text);
+        setLastServerText(data.text);
         
         // Only update the text if we haven't loaded yet or user isn't editing
         if (!loadedFromServer || !userEditingRef.current) {
-          setText(serverText);
-          setSavedText(serverText);
+          setText(data.text);
+          setSavedText(data.text);
           setHasChanges(false);
-        } else if (serverText !== text) {
+        } else if (data.text !== text) {
           // If we already loaded and the server text is different, mark changes
           setHasChanges(true);
         }
@@ -372,59 +338,19 @@ function TextShareApp() {
     }
   }, [id, text, loadedFromServer]);
   
-  // Function to apply server updates
-  const applyUpdates = useCallback(() => {
-    if (serverText !== text) {
-      console.log('Applying server updates');
-      setText(serverText);
-      setSavedText(serverText);
-      setHasChanges(false);
-      setUpdatesAvailable(false);
-    }
-  }, [serverText, text]);
-  
   // Initial load effect
   useEffect(() => {
-    console.log('Initial load effect triggered, id:', id);
     if (id) {
-      // Initialize text from server
-      console.log('Initializing text from server for session:', id);
       loadTextFromServer();
       
       // If there's seed data, use it
       if (seedData && !loadedFromServer) {
-        const initialText = seedData || '';
-        console.log('Using seed data for initial text');
-        setText(initialText);
-        setSavedText(initialText);
+        setText(seedData);
+        setSavedText(seedData);
         setHasChanges(true);
       }
-    } else {
-      console.log('No session ID available, not loading text');
     }
   }, [id, seedData, loadTextFromServer, loadedFromServer]);
-  
-  // Set up periodic polling for updates if autoUpdate is enabled
-  useEffect(() => {
-    if (!id || isRtcConnected || !autoUpdate) return;
-    
-    const checkInterval = setInterval(() => {
-      loadTextFromServer().then(() => {
-        setLastChecked(new Date());
-        // Check if there are updates available
-        if (serverText && serverText !== text) {
-          setUpdatesAvailable(true);
-          
-          // If autoUpdate is enabled, apply the updates immediately
-          if (autoUpdate && !userEditingRef.current) {
-            applyUpdates();
-          }
-        }
-      });
-    }, 5000); // Check every 5 seconds
-    
-    return () => clearInterval(checkInterval);
-  }, [id, isRtcConnected, autoUpdate, loadTextFromServer, serverText, text, applyUpdates]);
   
   // Handle copy to clipboard
   const handleCopy = useCallback(() => {
@@ -478,8 +404,8 @@ function TextShareApp() {
   }, [navigate]);
   
   // Calculate stats
-  const wordCount = text && text.trim() ? text.trim().split(/\s+/).length : 0;
-  const charCount = text ? text.length : 0;
+  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const charCount = text.length;
   
   // Assemble WebRTC status message
   const getWebRTCStatusMessage = useCallback(() => {
@@ -488,7 +414,7 @@ function TextShareApp() {
     }
     
     if (rtcConnected) {
-      const otherClients = activeUsers - 1;
+      const otherClients = rtcActiveUsers - 1;
       const clientLabel = otherClients === 1 ? 'client' : 'clients';
       return `Connected via WebRTC\n(${otherClients} other ${clientLabel})`;
     }
@@ -506,76 +432,55 @@ function TextShareApp() {
     }
     
     return 'WebRTC ready';
-  }, [rtcSupported, rtcConnected, rtcStage, activeUsers]);
+  }, [rtcSupported, rtcConnected, rtcStage, rtcActiveUsers]);
   
   // Enable WebRTC Debug
   const handleDebugWebRTC = useCallback(() => {
-    // Use WebRTCSocketManager's built-in debug functionality
-    setDebugMode(true);
-    console.log('WebRTC debug mode enabled');
-  }, [setDebugMode]);
+    enableWebRTCDebug();
+  }, []);
   
   // Handle Debug Log Submit
-  const handleSubmitDebugLogs = useCallback(() => {
-    // Log connection status to console
-    console.log('WebRTC debug information:', {
-      connectionStatus,
-      activeUsers,
-      rtcSupported,
-      rtcConnected,
-      webRtcConnectionStage: rtcStage,
-      dataChannelStatus
-    });
-    alert('Debug information has been logged to the console');
-  }, [connectionStatus, activeUsers, rtcSupported, rtcConnected, rtcStage, dataChannelStatus]);
+  const handleSubmitDebugLogs = useCallback(async () => {
+    if (!id) return;
+    
+    try {
+      const result = await sendWebRTCLogs(id, clientIdRef.current);
+      console.log('Debug log submission result:', result);
+      alert(result.message);
+    } catch (error) {
+      console.error('Error submitting debug logs:', error);
+      alert('Failed to submit debug logs');
+    }
+  }, [id]);
   
   // Render
   return (
     <div className={`app-container ${theme}`}>
       <AppHeader
-        LOGO_URL={LOGO_URL}
+        logo={LOGO_URL}
         onNew={handleNew}
         showRTCStatus={!!id}
         rtcStatus={getWebRTCStatusMessage()}
-        rtcConnected={isRtcConnected}
+        rtcConnected={rtcConnected}
         rtcStage={rtcStage}
         onDebugWebRTC={handleDebugWebRTC}
         onSubmitDebugLogs={handleSubmitDebugLogs}
-        autoUpdate={autoUpdate}
-        setAutoUpdate={setAutoUpdate}
-        updatesAvailable={updatesAvailable}
-        applyUpdates={applyUpdates}
-        lastChecked={lastChecked}
-        text={text}
-        serverText={serverText}
       />
       
       {!id ? (
-        <HomeContainer onNewClick={handleNew} API_BASE_URL={API_BASE_URL} LOGO_URL={LOGO_URL} />
+        <HomeContainer onNewClick={handleNew} />
       ) : (
         <>
           <TextAreaContainer
-            text={text}
-            handleTextChange={handleChange}
+            value={text}
+            onChange={handleChange}
             textAreaRef={textAreaRef}
             rtcStatus={rtcStage}
             isTyping={isTyping}
-            draftText=""
-            showDraft={false}
-            setShowDraft={() => {}}
-            hasDraft={false}
-            deleteDraft={() => {}}
-            setText={setText}
-            setHasChanges={setHasChanges}
-            savedText={savedText}
-            setStatus={() => {}}
-            saveDraft={() => {}}
-            MAX_TEXT_LENGTH={MAX_TEXT_LENGTH}
           />
           
           <ControlsBar
             hasChanges={hasChanges}
-            saveText={handleSave}
             isServerOnline={isServerOnline}
             isRtcConnected={isRtcConnected}
             wordCount={wordCount}
@@ -587,12 +492,6 @@ function TextShareApp() {
             showRTCControls={rtcSupported}
             rtcPollingPaused={isRtcPollingPaused}
             rtcStage={rtcStage}
-            webRtcConnectionStage={rtcStage}
-            activeUsers={activeUsers}
-            connectedPeers={Object.keys(dataChannelStatus || {})}
-            setShowShareModal={setShowModal}
-            isPollingPaused={isRtcPollingPaused}
-            status={hasChanges ? "unsaved" : "saved"}
           />
         </>
       )}

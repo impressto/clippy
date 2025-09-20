@@ -15,13 +15,19 @@ class WebRTCSocketAdapter {
 
   // Initialize the socket connection
   init(socketServerUrl = 'http://localhost:3000') {
-    // Don't re-initialize if already connected
-    if (this.socket && this.isConnected) return;
+    // If already connected, disconnect first
+    if (this.socket) {
+      console.log('Socket already exists, disconnecting first');
+      this.disconnect();
+    }
     
     console.log(`Initializing WebRTC Socket adapter with URL: ${socketServerUrl}`);
     
     this.socket = io(socketServerUrl, {
       reconnectionDelayMax: 10000,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      timeout: 10000,
       transports: ['websocket', 'polling']
     });
     
@@ -36,8 +42,18 @@ class WebRTCSocketAdapter {
       }
     });
     
-    this.socket.on('disconnect', () => {
-      console.log('Disconnected from WebRTC socket server');
+    this.socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error.message);
+      this.isConnected = false;
+    });
+    
+    this.socket.on('disconnect', (reason) => {
+      console.log('Disconnected from WebRTC socket server:', reason);
+      this.isConnected = false;
+    });
+    
+    this.socket.on('error', (error) => {
+      console.error('Socket error:', error);
       this.isConnected = false;
     });
     
