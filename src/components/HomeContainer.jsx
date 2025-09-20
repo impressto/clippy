@@ -38,13 +38,6 @@ const HomeContainer = ({ LOGO_URL, API_BASE_URL }) => {
 
   return (
     <div className="home-container">
-      <div className="app-header">
-        <div className="app-title">
-          <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
-          <h1>Welcome to Clippy</h1>
-          <ThemeToggle />
-        </div>
-      </div>
       <p className="app-description">
         Share text between computers securely and easily
       </p>

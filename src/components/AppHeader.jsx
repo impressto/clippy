@@ -9,14 +9,14 @@ import ThemeToggle from './ThemeToggle';
  */
 const AppHeader = ({ 
   LOGO_URL, 
-  autoUpdate, 
-  setAutoUpdate, 
-  updatesAvailable, 
-  applyUpdates, 
-  lastChecked, 
-  text, 
-  serverText,
-  isRtcConnected
+  autoUpdate = false, 
+  setAutoUpdate = () => {}, 
+  updatesAvailable = false, 
+  applyUpdates = () => {}, 
+  lastChecked = null, 
+  text = '', 
+  serverText = '',
+  isRtcConnected = false
 }) => {
   return (
     <div className="app-header">
@@ -31,8 +31,8 @@ const AppHeader = ({
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginRight: '0.75rem' }}>
             <input 
               type="checkbox" 
-              checked={autoUpdate} 
-              onChange={e => setAutoUpdate(e.target.checked)} 
+              checked={autoUpdate || false} 
+              onChange={e => typeof setAutoUpdate === 'function' && setAutoUpdate(e.target.checked)} 
             />
             <span style={{ fontSize: '0.85rem' }}>Auto-load updates</span>
           </label>

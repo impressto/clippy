@@ -1,4 +1,4 @@
-// WebRTCManager.js - Modified to use WebSocket server instead of PHP endpoints
+// WebRTCSocketManager.js - Modified to use WebSocket server instead of PHP endpoints
 import { useState, useRef, useEffect, useCallback } from 'react';
 import socketAdapter from './WebRTCSocketAdapter';
 
@@ -66,6 +66,20 @@ export const useWebRTCManager = (
   // Store pending ICE candidates that arrive before remote description is set
   const pendingIceCandidatesRef = useRef({});
   
+  // Function to announce presence to all active users in the session
+  const sendPresenceAnnouncement = useCallback((force = false) => {
+    if (!id || !clientIdRef.current) return;
+    
+    // Only send presence announcements if peer discovery is enabled
+    if (!peerDiscoveryEnabledRef.current && !force) {
+      console.log('Skipping presence announcement because peer discovery is disabled');
+      return;
+    }
+    
+    console.log(`Sending presence announcement to find other clients`);
+    socketAdapter.sendPresenceAnnouncement();
+  }, [id]);
+  
   // Initialize client ID and socket connection on component mount
   useEffect(() => {
     if (!clientIdRef.current) {
@@ -96,7 +110,8 @@ export const useWebRTCManager = (
       socketAdapter.onClientList((clients) => {
         if (!id || !clientIdRef.current) return;
         
-        console.log(`Received client list from socket server: ${clients.join(', ')}`);
+        console.log(`Received client list from socket server for session ${id}: ${clients.join(', ')}`);
+        console.log(`Current client ID: ${clientIdRef.current}, is in list: ${clients.includes(clientIdRef.current)}`);
         
         // Check for new clients to connect to
         clients.forEach(otherClientId => {
@@ -142,6 +157,15 @@ export const useWebRTCManager = (
     if (id && clientIdRef.current && rtcSupported) {
       console.log(`Joining session ${id}`);
       socketAdapter.joinSession(id, clientIdRef.current);
+      
+      // Start peer discovery automatically when joining a session
+      if (peerDiscoveryEnabled) {
+        console.log('Automatically starting peer discovery');
+        sendPresenceAnnouncement(true);
+      } else {
+        console.log('Setting peer discovery enabled');
+        setPeerDiscoveryEnabled(true);
+      }
     }
     
     return () => {
@@ -149,7 +173,7 @@ export const useWebRTCManager = (
         socketAdapter.leaveSession();
       }
     };
-  }, [id, rtcSupported]);
+  }, [id, rtcSupported, peerDiscoveryEnabled, sendPresenceAnnouncement]);
   
   // Update typing state ref when the prop changes
   useEffect(() => {
@@ -166,7 +190,7 @@ export const useWebRTCManager = (
   const updateActiveUserCount = useCallback(() => {
     // Count number of connected peers plus this client
     const connectedPeers = Object.keys(dataChannelsRef.current).filter(
-      peerId => dataChannelsRef.current[peerId].readyState === 'open'
+      peerId => dataChannelsRef.current[peerId] && dataChannelsRef.current[peerId].readyState === 'open'
     ).length;
     
     // Add 1 for the current user
@@ -208,6 +232,9 @@ export const useWebRTCManager = (
       peerDiscoveryEnabled && peerCount === 0 ? 'discovering' : 'waiting';
     
     console.log(`WebRTC status update: ${newStatus}, stage: ${newConnectionStage}, peers: ${peerCount}, open channels: ${connectedChannels}`);
+    
+    // Always update the active user count when connection status changes
+    updateActiveUserCount();
     setRtcConnected(connectedChannels > 0);
     setConnectionStatus(newStatus);
     setWebRtcConnectionStage(newConnectionStage);
@@ -521,6 +548,33 @@ export const useWebRTCManager = (
     updateRtcConnectionStatus();
   }, [updateRtcConnectionStatus]);
   
+  // Handle text updates received from peers
+  const handleTextUpdate = useCallback((newText) => {
+    // Check if this is the same as our last received text to prevent loops
+    if (newText === lastReceivedTextRef.current) {
+      console.log('Received duplicate text update, ignoring');
+      return;
+    }
+    
+    // Update our last received text reference
+    lastReceivedTextRef.current = newText;
+    
+    // Only update if we're not currently typing
+    if (!isTypingRef.current) {
+      console.log('Not currently typing, updating text immediately');
+      setText(newText);
+      setSavedText(newText);
+      setServerText(newText);
+      setLastServerText(newText);
+      lastServerTextRef.current = newText;
+      setHasChanges(false);
+    } else {
+      console.log('Currently typing, saving update for later');
+      // Save for later application when we're done typing
+      pendingTextUpdatesRef.current = newText;
+    }
+  }, [setText, setSavedText, setServerText, setLastServerText, setHasChanges]);
+  
   // Set up data channel for a peer
   const setupDataChannel = useCallback((dataChannel, peerId) => {
     console.log(`Setting up data channel for peer ${peerId}`);
@@ -531,6 +585,9 @@ export const useWebRTCManager = (
       
       // Update the overall connection status when a data channel opens
       updateRtcConnectionStatus();
+      
+      // Explicitly update active user count when a new channel opens
+      updateActiveUserCount();
       
       // When connected, send current text to peer
       if (text) {
@@ -568,6 +625,7 @@ export const useWebRTCManager = (
     dataChannel.onclose = () => {
       console.log(`Data channel with ${peerId} closed`);
       updateRtcConnectionStatus();
+      updateActiveUserCount(); // Update user count when a channel closes
     };
     
     dataChannel.onmessage = (event) => {
@@ -582,22 +640,8 @@ export const useWebRTCManager = (
         console.error('Error processing message:', error);
       }
     };
-  }, [text, updateRtcConnectionStatus]);
+  }, [text, updateRtcConnectionStatus, updateActiveUserCount]);
   
-  // Function to announce presence to all active users in the session
-  const sendPresenceAnnouncement = useCallback((force = false) => {
-    if (!id || !clientIdRef.current) return;
-    
-    // Only send presence announcements if peer discovery is enabled
-    if (!peerDiscoveryEnabledRef.current && !force) {
-      console.log('Skipping presence announcement because peer discovery is disabled');
-      return;
-    }
-    
-    console.log(`Sending presence announcement to find other clients`);
-    socketAdapter.sendPresenceAnnouncement();
-  }, [id]);
-
   // Function to broadcast text to all connected peers
   const broadcastTextToAllPeers = useCallback((textToSend) => {
     if (!text || text === lastSentTextRef.current) {
@@ -623,33 +667,6 @@ export const useWebRTCManager = (
     
     lastSentTextRef.current = textToSend;
   }, []);
-  
-  // Handle text updates received from peers
-  const handleTextUpdate = useCallback((newText) => {
-    // Check if this is the same as our last received text to prevent loops
-    if (newText === lastReceivedTextRef.current) {
-      console.log('Received duplicate text update, ignoring');
-      return;
-    }
-    
-    // Update our last received text reference
-    lastReceivedTextRef.current = newText;
-    
-    // Only update if we're not currently typing
-    if (!isTypingRef.current) {
-      console.log('Not currently typing, updating text immediately');
-      setText(newText);
-      setSavedText(newText);
-      setServerText(newText);
-      setLastServerText(newText);
-      lastServerTextRef.current = newText;
-      setHasChanges(false);
-    } else {
-      console.log('Currently typing, saving update for later');
-      // Save for later application when we're done typing
-      pendingTextUpdatesRef.current = newText;
-    }
-  }, [setText, setSavedText, setServerText, setLastServerText, setHasChanges]);
   
   // Function to manually start peer discovery process
   const startPeerSearch = useCallback(() => {
@@ -705,6 +722,46 @@ export const useWebRTCManager = (
     }
   }, [isTyping, setText, setSavedText, setServerText, setLastServerText, setHasChanges]);
   
+  // Function to manually initiate peer connections
+  const initiatePeerConnections = () => {
+    console.log('Manually initiating peer connections');
+    
+    // Set the connection stage to discovering
+    setWebRtcConnectionStage('discovering');
+    
+    // Enable peer discovery
+    setPeerDiscoveryEnabled(true);
+    peerDiscoveryEnabledRef.current = true;
+    
+    // Ensure the socket is initialized
+    if (!socketAdapter.isConnected) {
+      console.log('Socket not connected, initializing...');
+      socketAdapter.init(SOCKET_SERVER_URL);
+    }
+    
+    // Wait a short time to ensure socket connection is established
+    setTimeout(() => {
+      // Join the session if not already joined
+      if (id && clientIdRef.current) {
+        console.log(`Joining session ${id} as ${clientIdRef.current}`);
+        const joined = socketAdapter.joinSession(id, clientIdRef.current);
+        console.log(`Join session result: ${joined ? 'success' : 'failed'}`);
+      } else {
+        console.error('Cannot join session: missing id or clientId', { id, clientId: clientIdRef.current });
+      }
+      
+      // Announce presence to get the client list
+      console.log('Sending presence announcement');
+      socketAdapter.sendPresenceAnnouncement();
+      
+      // Set a timer to retry presence announcement in case the first one doesn't work
+      setTimeout(() => {
+        console.log('Sending follow-up presence announcement');
+        socketAdapter.sendPresenceAnnouncement();
+      }, 2000);
+    }, 500);
+  };
+  
   // Return state and methods for use in components
   return {
     rtcSupported,
@@ -723,6 +780,12 @@ export const useWebRTCManager = (
     startPeerSearch,
     disconnectPeers,
     peerDiscoveryEnabled,
-    setPeerDiscoveryEnabled
+    setPeerDiscoveryEnabled,
+    // Add the initiate connections function
+    initiatePeerConnections,
+    // Add method to send text to all peers
+    sendTextToAllPeers: broadcastTextToAllPeers,
+    // Add isPollingPaused for the App component
+    isPollingPaused: false
   };
 };

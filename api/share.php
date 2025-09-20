@@ -1,8 +1,26 @@
 <?php
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
+
+// Allow requests from any origin during development
+$allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:8080',
+    'https://impressto.ca'
+];
+
+$origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+
+if (in_array($origin, $allowedOrigins)) {
+    header("Access-Control-Allow-Origin: $origin");
+} else {
+    header("Access-Control-Allow-Origin: https://impressto.ca");
+}
+
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-Client-ID, X-Session-ID');
+header('Access-Control-Allow-Headers: Content-Type, x-client-id');
+header('Access-Control-Allow-Credentials: true');
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 header("Content-Security-Policy: default-src 'none'");
@@ -14,8 +32,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 // Directory to store shared text files
 $dataDir = __DIR__ . '/../data';
-// Session activity tracking file
-$sessionTrackingFile = $dataDir . '/active_sessions.json';
 
 try {
     // Create data directory if it doesn't exist
@@ -31,146 +47,30 @@ try {
         throw new Exception("Data directory exists but is not writable: {$dataDir}");
     }
 } catch (Exception $e) {
-    echo json_encode(['error' => 'Server configuration error', 'debug' => $e->getMessage()]);
+    echo json_encode(['status' => 'error', 'message' => 'Server configuration error', 'debug' => $e->getMessage()]);
     exit;
 }
 
 // Generate a unique ID for new sessions
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['id'])) {
     $uniqueId = bin2hex(random_bytes(8)); // Using 8 bytes for stronger security
-    echo json_encode(['id' => $uniqueId]);
+    echo json_encode(['status' => 'success', 'id' => $uniqueId]);
     exit;
 }
-
-// Function to track active sessions
-function trackSession($sessionId, $action = 'ping') {
-    global $sessionTrackingFile;
-    
-    // Generate a unique client ID if not provided
-    $clientId = isset($_SERVER['HTTP_X_CLIENT_ID']) ? $_SERVER['HTTP_X_CLIENT_ID'] : uniqid();
-    
-    $sessions = [];
-    if (file_exists($sessionTrackingFile)) {
-        $data = file_get_contents($sessionTrackingFile);
-        if ($data) {
-            $sessions = json_decode($data, true) ?: [];
-        }
-    }
-    
-    // Current timestamp
-    $now = time();
-    
-    // Clean up expired sessions (older than 30 seconds)
-    foreach ($sessions as $id => $sessionData) {
-        foreach ($sessionData['clients'] as $cId => $lastSeen) {
-            if ($now - $lastSeen > 30) {
-                unset($sessions[$id]['clients'][$cId]);
-            }
-        }
-        
-        // If no clients left, remove the session
-        if (empty($sessions[$id]['clients'])) {
-            unset($sessions[$id]);
-        }
-    }
-    
-    // For 'ping' action, update the session
-    if ($action === 'ping') {
-        if (!isset($sessions[$sessionId])) {
-            $sessions[$sessionId] = [
-                'clients' => [],
-                'created' => $now
-            ];
-        }
-        
-        // Update this client's timestamp
-        $sessions[$sessionId]['clients'][$clientId] = $now;
-    } elseif ($action === 'leave' && isset($sessions[$sessionId]['clients'][$clientId])) {
-        // For 'leave' action, remove the client
-        unset($sessions[$sessionId]['clients'][$clientId]);
-        
-        // If no clients left, remove the session
-        if (empty($sessions[$sessionId]['clients'])) {
-            unset($sessions[$sessionId]);
-        }
-    }
-    
-    // Save updated session data
-    file_put_contents($sessionTrackingFile, json_encode($sessions));
-    
-    // Return the number of active clients for this session
-    return isset($sessions[$sessionId]) ? count($sessions[$sessionId]['clients']) : 0;
-}
-
-// Handle active user tracking endpoint
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['track'])) {
-    // Get session ID from header or query parameter
-    $id = isset($_SERVER['HTTP_X_SESSION_ID']) ? $_SERVER['HTTP_X_SESSION_ID'] : ($_GET['id'] ?? null);
-    
-    // Make sure we have an ID
-    if (!$id) {
-        echo json_encode(['error' => 'Missing session ID']);
-        exit;
-    }
-    
-    // Validate ID format to prevent directory traversal
-    if (!preg_match('/^[a-f0-9]+$/', $id)) {
-        echo json_encode(['error' => 'Invalid ID format']);
-        exit;
-    }
-    
-    $action = $_GET['track'] === 'leave' ? 'leave' : 'ping';
-    $activeUsers = trackSession($id, $action);
-    
-    // Get the list of clients in this session
-    $clientList = [];
-    $sessions = [];
-    if (file_exists($sessionTrackingFile)) {
-        $data = file_get_contents($sessionTrackingFile);
-        if ($data) {
-            $sessions = json_decode($data, true) ?: [];
-            if (isset($sessions[$id]) && isset($sessions[$id]['clients'])) {
-                $clientList = array_keys($sessions[$id]['clients']);
-                // Debug logging
-                error_log("Session $id has " . count($clientList) . " clients: " . implode(', ', $clientList));
-            } else {
-                error_log("Session $id exists but has no clients array");
-            }
-        } else {
-            error_log("Session tracking file exists but is empty or invalid JSON");
-        }
-    } else {
-        error_log("Session tracking file does not exist at: $sessionTrackingFile");
-    }
-    
-    echo json_encode([
-        'status' => 'success',
-        'activeUsers' => $activeUsers,
-        'clientList' => $clientList
-    ]);
-    exit;
-}
-
 
 // Handle text sharing
 // Get session ID from header or query parameter
 $id = isset($_SERVER['HTTP_X_SESSION_ID']) ? $_SERVER['HTTP_X_SESSION_ID'] : ($_GET['id'] ?? null);
 
-// Make sure we have an ID
-if (!$id) {
-    echo json_encode(['error' => 'Missing session ID']);
-    exit;
-}
-
 // Validate ID format to prevent directory traversal
 if (!preg_match('/^[a-f0-9]+$/', $id)) {
-    echo json_encode(['error' => 'Invalid ID format']);
+    echo json_encode(['status' => 'error', 'message' => 'Invalid ID format']);
     exit;
 }
 
 $filename = $dataDir . "/shared_text_{$id}.txt";
 
-// For POST requests, get the text from the request body
+// For POST requests, save the text to the file
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $inputJSON = file_get_contents('php://input');
     $input = json_decode($inputJSON, TRUE);
@@ -192,27 +92,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception("Directory is not writable: " . dirname($filename));
             }
             
-
-        
-        // Set a maximum number of files (prevent unlimited file creation)
-        $maxFiles = 1000;
-        $files = glob("{$dataDir}/shared_text_*.txt");
-        if (count($files) >= $maxFiles) {
-            // Optional: Remove oldest file
-            if (count($files) > 0) {
-                // Sort files by modification time, oldest first
-                usort($files, function($a, $b) {
-                    return filemtime($a) - filemtime($b);
-                });
-                // Delete oldest file
-                @unlink($files[0]);
+            // Set a maximum number of files (prevent unlimited file creation)
+            $maxFiles = 1000;
+            $files = glob("{$dataDir}/shared_text_*.txt");
+            if (count($files) >= $maxFiles) {
+                // Optional: Remove oldest file
+                if (count($files) > 0) {
+                    // Sort files by modification time, oldest first
+                    usort($files, function($a, $b) {
+                        return filemtime($a) - filemtime($b);
+                    });
+                    // Delete oldest file
+                    @unlink($files[0]);
+                }
             }
-        }
-        
-        // Write the text to the file
-        if (file_put_contents($filename, $text) === false) {
-            throw new Exception("Failed to write to file: {$filename}");
-        }
+            
+            // Write the text to the file
+            if (file_put_contents($filename, $text) === false) {
+                throw new Exception("Failed to write to file: {$filename}");
+            }
             
             echo json_encode(['status' => 'success']);
         } catch (Exception $e) {
@@ -236,6 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && $id && isset($_GET['status'])) {
             $size = filesize($filename);
             
             echo json_encode([
+                'status' => 'success',
                 'exists' => true,
                 'modified' => $mtime,
                 'modified_iso' => date('c', $mtime),
@@ -245,6 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && $id && isset($_GET['status'])) {
         } else {
             // File doesn't exist
             echo json_encode([
+                'status' => 'success',
                 'exists' => false
             ]);
         }
@@ -273,10 +173,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && $id) {
                 throw new Exception("Failed to read file content: {$filename}");
             }
             
-            echo json_encode(['text' => $content]);
+            echo json_encode(['status' => 'success', 'text' => $content]);
         } else {
             // Return empty text for new shares
-            echo json_encode(['text' => '']);
+            echo json_encode(['status' => 'success', 'text' => '']);
         }
     } catch (Exception $e) {
         echo json_encode([
@@ -288,5 +188,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && $id) {
     exit;
 }
 
-echo json_encode(['error' => 'Invalid request']);
+// If we get here, the request is invalid
+echo json_encode(['status' => 'error', 'message' => 'Invalid request']);
 ?>

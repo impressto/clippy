@@ -1,0 +1,48 @@
+/* WebRTC status styles */
+.rtc-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.discovery-status {
+  color: #6c757d;
+  font-style: italic;
+}
+
+.connecting-status {
+  color: #007bff;
+  font-weight: 500;
+}
+
+.failed-status {
+  color: #dc3545;
+  font-weight: 500;
+}
+
+.active-users-count {
+  color: #28a745;
+  font-weight: 500;
+}
+
+/* Animated dots for connection in progress */
+@keyframes dots {
+  0%, 20% { content: "."; }
+  40% { content: ".."; }
+  60% { content: "..."; }
+  80%, 100% { content: ""; }
+}
+
+.connecting-status::after {
+  content: "";
+  animation: dots 1.5s infinite;
+  display: inline-block;
+  width: 16px;
+}
+
+.discovery-status::after {
+  content: "";
+  animation: dots 1.5s infinite;
+  display: inline-block;
+  width: 16px;
+}
