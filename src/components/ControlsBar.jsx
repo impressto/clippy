@@ -1,10 +1,11 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faSync, faShare, faUsers } from '@fortawesome/free-solid-svg-icons';
+import { faSave, faSync, faShare, faUsers, faUserPlus, faUserMinus } from '@fortawesome/free-solid-svg-icons';
 
 /**
  * ControlsBar component displays the main control buttons and status information
- * including save button, check updates button, share button, and WebRTC connection status.
+ * including save button, check updates button, share button, connect to peers button,
+ * and WebRTC connection status.
  */
 const ControlsBar = ({
   hasChanges,
@@ -20,7 +21,10 @@ const ControlsBar = ({
   isPollingPaused,
   lastChecked,
   updatesAvailable,
-  webRtcConnectionStage
+  webRtcConnectionStage,
+  startPeerSearch,
+  disconnectPeers,
+  peerDiscoveryEnabled
 }) => {
   // Function to get WebRTC status message based on the connection stage
   const getRtcStatusMessage = () => {
@@ -83,6 +87,17 @@ const ControlsBar = ({
         >
           <FontAwesomeIcon icon={faShare} className="button-icon" /> Share
         </button>
+        
+        {rtcSupported && (
+          <button 
+            className={`peer-connection-button ${peerDiscoveryEnabled ? 'discovery-enabled' : ''}`}
+            onClick={peerDiscoveryEnabled ? disconnectPeers : startPeerSearch}
+            title={peerDiscoveryEnabled ? "Disconnect from peers" : "Connect to peers for real-time collaboration"}
+          >
+            <FontAwesomeIcon icon={peerDiscoveryEnabled ? faUserMinus : faUserPlus} className="button-icon" /> 
+            {peerDiscoveryEnabled ? "Disconnect Peers" : "Connect to Peers"}
+          </button>
+        )}
       </div>
       
       <div className="status">

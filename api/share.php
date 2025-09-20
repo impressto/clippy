@@ -2,7 +2,7 @@
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Headers: Content-Type, X-Client-ID, X-Session-ID');
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 header("Content-Security-Policy: default-src 'none'");
@@ -103,8 +103,15 @@ function trackSession($sessionId, $action = 'ping') {
 }
 
 // Handle active user tracking endpoint
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['id']) && isset($_GET['track'])) {
-    $id = $_GET['id'];
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['track'])) {
+    // Get session ID from header or query parameter
+    $id = isset($_SERVER['HTTP_X_SESSION_ID']) ? $_SERVER['HTTP_X_SESSION_ID'] : ($_GET['id'] ?? null);
+    
+    // Make sure we have an ID
+    if (!$id) {
+        echo json_encode(['error' => 'Missing session ID']);
+        exit;
+    }
     
     // Validate ID format to prevent directory traversal
     if (!preg_match('/^[a-f0-9]+$/', $id)) {
@@ -124,8 +131,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['id']) && isset($_GET['t
             $sessions = json_decode($data, true) ?: [];
             if (isset($sessions[$id]) && isset($sessions[$id]['clients'])) {
                 $clientList = array_keys($sessions[$id]['clients']);
+                // Debug logging
+                error_log("Session $id has " . count($clientList) . " clients: " . implode(', ', $clientList));
+            } else {
+                error_log("Session $id exists but has no clients array");
             }
+        } else {
+            error_log("Session tracking file exists but is empty or invalid JSON");
         }
+    } else {
+        error_log("Session tracking file does not exist at: $sessionTrackingFile");
     }
     
     echo json_encode([
@@ -138,8 +153,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['id']) && isset($_GET['t
 
 
 // Handle text sharing
-$id = $_GET['id'] ?? '';
+// Get session ID from header or query parameter
+$id = isset($_SERVER['HTTP_X_SESSION_ID']) ? $_SERVER['HTTP_X_SESSION_ID'] : ($_GET['id'] ?? null);
 
+// Make sure we have an ID
+if (!$id) {
+    echo json_encode(['error' => 'Missing session ID']);
+    exit;
+}
 
 // Validate ID format to prevent directory traversal
 if (!preg_match('/^[a-f0-9]+$/', $id)) {

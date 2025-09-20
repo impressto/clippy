@@ -545,8 +545,35 @@ body.dark-theme {
 }
 
 .share-toggle-button:hover {
-  background-color: #3d8080;
+  background-color: #4682b4;
   transform: translateY(-1px);
+}
+
+.peer-connection-button {
+  background-color: #4a9e5c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.peer-connection-button:hover {
+  background-color: #3d8a4e;
+  transform: translateY(-1px);
+}
+
+.peer-connection-button.discovery-enabled {
+  background-color: #e67e22;
+}
+
+.peer-connection-button.discovery-enabled:hover {
+  background-color: #d35400;
 }
 
 .share-toggle-button:active {

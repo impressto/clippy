@@ -91,8 +91,7 @@ function TextShareApp() {
   });
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-  // Active users tracking
-  const [activeUsers, setActiveUsers] = useState(1); // Start with yourself
+  // Client identification
   const clientIdRef = useRef(null);
   
   // WebRTC related state
@@ -100,9 +99,12 @@ function TextShareApp() {
   const [connectedPeers, setConnectedPeers] = useState([]);
   const [rtcSupported, setRtcSupported] = useState(false);
   const [isRtcConnected, setIsRtcConnected] = useState(false);
+  const [peerSearchStarted, setPeerSearchStarted] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState({});
   const [isPollingPaused, setIsPollingPaused] = useState(false);
   const [webRtcConnectionStage, setWebRtcConnectionStage] = useState('initializing'); // New state for detailed connection progress
+  const [peerDiscoveryEnabled, setPeerDiscoveryEnabled] = useState(false); // Added for WebRTC discovery control
+  const [activeUsers, setActiveUsers] = useState(1); // Added for tracking active users
   const peerConnectionsRef = useRef({});
   const dataChannelsRef = useRef({});
   const isTypingRef = useRef(false);
@@ -111,6 +113,7 @@ function TextShareApp() {
   const pendingTextUpdatesRef = useRef(null);
   const lastUpdateTimestampRef = useRef(0);
   const lastReceivedTimestampRef = useRef(0);
+  const lastSaveTimeRef = useRef(0);
   
   // Connection status logger - helps monitor WebRTC status
   const connectionLoggerRef = useRef(null);
@@ -400,6 +403,9 @@ function TextShareApp() {
     try {
       setStatus('saving');
       
+      // Record the save time for polling optimization
+      lastSaveTimeRef.current = Date.now();
+      
       // Capture the exact text being saved
       const textToSave = text;
       
@@ -457,9 +463,15 @@ function TextShareApp() {
         return;
       }
       
+      // Skip checking if we just saved text (avoid rapid polling right after save)
+      const timeSinceLastSave = Date.now() - lastSaveTimeRef.current;
+      if (timeSinceLastSave < 3000) { // 3 seconds
+        console.log('Skipping text check, recent save detected');
+        setLastChecked(new Date());
+        return;
+      }
+      
       try {
-        
-        
         // Add timestamp to URL to prevent caching issues
         const cacheBreaker = new Date().getTime();
         
@@ -557,7 +569,8 @@ function TextShareApp() {
       if (id && clientIdRef.current && !isPollingPausedRef.current) {
         pingActiveUsers();
       }
-    }, 10000); // 10 second interval is fine since we have rate limiting
+    }, 5000); // Increased polling frequency to 5 seconds for more responsive text updates
+              // This is safe now that we've removed unnecessary WebRTC calls
     
     // Set up periodic checking for new clients with dynamic interval
     const clientCheckInterval = setInterval(() => {
@@ -623,6 +636,71 @@ function TextShareApp() {
     };
   }, [id, autoUpdate]); // Include autoUpdate in deps to respond to changes
   
+  // Function to start peer search manually
+  const startPeerSearch = () => {
+    if (!peerSearchStarted && rtcSupported && id) {
+      console.log("Starting manual peer search...");
+      setPeerSearchStarted(true);
+      setPeerDiscoveryEnabled(true); // Enable peer discovery when user clicks Connect to peers
+      
+      // First ping to get active users
+      pingActiveUsers().then(() => {
+        // If WebRTC is supported, start WebRTC signaling
+        if (window.RTCPeerConnection && window.RTCSessionDescription) {
+          console.log("Starting WebRTC signaling...");
+          startWebRTCSignaling();
+          
+          // Start the connection status logger
+          logConnectionStatus();
+          
+          // After a short delay, send a presence announcement to initiate connections
+          setTimeout(() => {
+            sendPresenceAnnouncement();
+          }, 2000);
+        }
+      });
+    }
+  };
+  
+  // Function to disconnect from peers and disable WebRTC
+  const disconnectPeers = () => {
+    if (peerDiscoveryEnabled) {
+      console.log("Disconnecting from peers...");
+      setPeerDiscoveryEnabled(false);
+      
+      // Close all peer connections
+      Object.keys(peerConnectionsRef.current).forEach(peerId => {
+        // Send a bye signal to each peer
+        sendSignal(peerId, { type: 'bye' });
+        
+        // Close the data channel if it exists
+        const dataChannel = dataChannelsRef.current[peerId];
+        if (dataChannel) {
+          dataChannel.close();
+          delete dataChannelsRef.current[peerId];
+        }
+        
+        // Close the peer connection
+        const peerConnection = peerConnectionsRef.current[peerId];
+        if (peerConnection) {
+          peerConnection.close();
+          delete peerConnectionsRef.current[peerId];
+        }
+      });
+      
+      // Reset states
+      setPeerSearchStarted(false);
+      setIsRtcConnected(false);
+      setWebRtcConnectionStage('waiting');
+      
+      // Clear intervals if needed
+      if (connectionLoggerRef.current) {
+        clearTimeout(connectionLoggerRef.current);
+        connectionLoggerRef.current = null;
+      }
+    }
+  };
+
   // Function to generate a client ID on mount
   useEffect(() => {
     // Generate a unique client ID if we don't have one yet
@@ -642,26 +720,9 @@ function TextShareApp() {
       console.warn("WebRTC is NOT supported in this browser");
     }
     
-    // Ping for active users immediately on mount if we have an ID
+    // Just log the session ID on mount
     if (id) {
       console.log("Session ID:", id);
-      
-      // First ping to get active users
-      pingActiveUsers().then(() => {
-        // If WebRTC is supported, start WebRTC signaling
-        if (window.RTCPeerConnection && window.RTCSessionDescription) {
-          console.log("Starting WebRTC signaling...");
-          startWebRTCSignaling();
-          
-          // Start the connection status logger
-          logConnectionStatus();
-          
-          // After a short delay, send a presence announcement to initiate connections
-          setTimeout(() => {
-            sendPresenceAnnouncement();
-          }, 2000);
-        }
-      });
     }
     
     // Set up beforeunload event to leave the session when the user closes the tab
@@ -729,6 +790,12 @@ function TextShareApp() {
   
   const pollForSignals = async () => {
     if (!id || !clientIdRef.current) return;
+    
+    // Don't poll for signals if peer discovery is disabled
+    if (!peerDiscoveryEnabled) {
+      console.log('Skipping WebRTC signal polling - peer discovery disabled');
+      return;
+    }
     
     // Don't call the rate limiter here since we use a dynamic polling interval instead
     // The polling logic already handles backoff
@@ -798,13 +865,13 @@ function TextShareApp() {
             peerId => dataChannelsRef.current[peerId].readyState === 'open'
           ).length;
           
-          // If we have connections to everyone (activeUsers minus ourselves)
-          if (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) {
+          // If we have established WebRTC connections, we can slow down polling significantly
+          if (connectedPeersCount > 0) {
             // Set polling to paused state since we don't need signaling anymore
             // But still keep it running at a very slow rate in case new peers join
             isPollingPausedRef.current = true;
             pollIntervalRef.current = 120000; // 2 minutes
-            console.log(`All peers connected (${connectedPeersCount}/${activeUsers-1}), pausing signaling with check every ${pollIntervalRef.current/1000} seconds`);
+            console.log(`WebRTC connections established (${connectedPeersCount} peer(s)), pausing signaling with check every ${pollIntervalRef.current/1000} seconds`);
           } else
           // If we're not in active mode, implement exponential backoff up to 10 seconds
           if (!activeConnectionModeRef.current) {
@@ -828,11 +895,11 @@ function TextShareApp() {
         peerId => dataChannelsRef.current[peerId].readyState === 'open'
       ).length;
       
-      // Allow longer backoff intervals when we have full connectivity
-      if (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) {
+      // Allow longer backoff intervals when we have connectivity
+      if (connectedPeersCount > 0) {
         isPollingPausedRef.current = true;
-        pollIntervalRef.current = 120000; // 2 minutes on error with all peers connected
-        console.log(`Network error, but all peers connected. Pausing polling with check every ${pollIntervalRef.current/1000} seconds`);
+        pollIntervalRef.current = 120000; // 2 minutes on error with peers connected
+        console.log(`Network error, but have ${connectedPeersCount} peer(s) connected. Pausing polling with check every ${pollIntervalRef.current/1000} seconds`);
       } else {
         pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 15000); // Up to 15 seconds
       }
@@ -1144,16 +1211,12 @@ function TextShareApp() {
     }
     
     // Get expected peer count
-    const expectedPeerCount = Math.max(0, activeUsers - 1);
-    
     // Determine connection stage based on counts
-    if (connectedCount === 0 && connectingCount === 0 && expectedPeerCount > 0) {
+    if (connectedCount === 0 && connectingCount === 0) {
       setWebRtcConnectionStage('discovering');
     } else if (connectedCount === 0 && connectingCount > 0) {
       setWebRtcConnectionStage('connecting');
-    } else if (connectedCount > 0 && connectedCount < expectedPeerCount) {
-      setWebRtcConnectionStage('partially-connected');
-    } else if (connectedCount >= expectedPeerCount && expectedPeerCount > 0) {
+    } else if (connectedCount > 0) {
       setWebRtcConnectionStage('fully-connected');
     } else if (failedCount > 0 && connectedCount === 0) {
       setWebRtcConnectionStage('failed');
@@ -1409,29 +1472,28 @@ function TextShareApp() {
     }
   };
   
-  // Function to ping the server for active users
+  // Function to keep WebRTC signaling alive and check for new peers
   const pingActiveUsers = async () => {
     if (!id || !clientIdRef.current) return;
     
-    // Check if we already have connections to all peers
-    const connectedPeersCount = Object.keys(dataChannelsRef.current).filter(
-      peerId => dataChannelsRef.current[peerId].readyState === 'open'
-    ).length;
+    const hasRtcConnections = rtcSupported && peerDiscoveryEnabled;
+    const connectedPeersCount = hasRtcConnections ? 
+      Object.keys(dataChannelsRef.current).filter(
+        peerId => dataChannelsRef.current[peerId].readyState === 'open'
+      ).length : 0;
     
-    // If we have a stable WebRTC connection to all peers, we can skip pinging the server
-    // Only ping occasionally to maintain server-side session
-    const allPeersConnected = connectedPeersCount >= activeUsers - 1 && activeUsers > 1;
-    
-    if (isRtcConnected && allPeersConnected) {
-      // If we have all peers connected, only ping the server very rarely (1 in 10 chance)
-      // This keeps the server-side session alive while avoiding unnecessary traffic
-      if (Math.random() > 0.1) {
-        return; // Skip most pings when fully connected via WebRTC
-      }
+    // Adaptive ping intervals based on WebRTC status:
+    // - If WebRTC is disabled: frequent pings (3 seconds) for good text sync
+    // - If WebRTC is enabled but no connections: moderate pings (5 seconds)
+    // - If WebRTC is enabled with connections: less frequent pings (30 seconds)
+    let pingInterval;
+    if (!hasRtcConnections) {
+      pingInterval = 10000; // 3 seconds when WebRTC is disabled (only text syncing)
+    } else if (connectedPeersCount === 0) {
+      pingInterval = 10000; // 5 seconds when looking for peers
+    } else {
+      pingInterval = 30000; // 30 seconds when connected to peers
     }
-    
-    // If we have connections to all peers, we can reduce the ping frequency
-    const pingInterval = (connectedPeersCount >= activeUsers - 1 && activeUsers > 1) ? 30000 : 5000;
     
     // Rate limit this call based on connection status
     if (!canCallEndpoint(`ping-active-users-${id}`, pingInterval)) {
@@ -1765,7 +1827,6 @@ function TextShareApp() {
       <ControlsBar
         hasChanges={hasChanges}
         saveText={saveText}
-        activeUsers={activeUsers}
         manualCheckForUpdates={manualCheckForUpdates}
         setShowShareModal={setShowShareModal}
         status={status}
@@ -1777,6 +1838,10 @@ function TextShareApp() {
         lastChecked={lastChecked}
         updatesAvailable={updatesAvailable}
         webRtcConnectionStage={webRtcConnectionStage}
+        startPeerSearch={startPeerSearch}
+        disconnectPeers={disconnectPeers}
+        peerDiscoveryEnabled={peerDiscoveryEnabled}
+        activeUsers={activeUsers}
       />
       
       <ShareModal
