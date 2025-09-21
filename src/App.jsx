@@ -43,7 +43,8 @@ function TextShareApp() {
   };
 
   // Theme
-  const { theme } = useTheme();
+  const { isDark } = useTheme();
+  const theme = isDark ? 'dark-theme' : 'light-theme';
   
   // Navigation and parameters
   const navigate = useNavigate();
@@ -683,14 +684,13 @@ function TextShareApp() {
       {!id ? (
         // Home/Landing page - no session ID
         <div className="landing-page">
-          <div className="app-header">
+          <div className="app-header landing-header-centered">
             <div className="app-title">
               <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
               <h1>Clippy</h1>
               <ThemeToggle />
             </div>
           </div>
-          
           <HomeContainer onNewClick={handleNew} API_BASE_URL={API_BASE_URL} LOGO_URL={LOGO_URL} />
           <Footer />
         </div>
