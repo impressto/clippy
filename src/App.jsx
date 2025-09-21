@@ -63,6 +63,7 @@ function TextShareApp() {
   const [isServerOnline, setIsServerOnline] = useState(true);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [socketClients, setSocketClients] = useState(0);
+  const [isPollingPausedFromTyping, setIsPollingPausedFromTyping] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState(() => {
     // Load from localStorage if available
     const saved = localStorage.getItem('autoUpdate');
@@ -135,6 +136,9 @@ function TextShareApp() {
     return () => {
       if (window.userEditingResetTimer) {
         clearTimeout(window.userEditingResetTimer);
+      }
+      if (savingTimeoutRef.current) {
+        clearTimeout(savingTimeoutRef.current);
       }
     };
   }, []);
@@ -227,7 +231,11 @@ function TextShareApp() {
       setHasChanges(newText !== serverText);
       userEditingRef.current = true;
       
-      // Handle auto-save with debounce
+      // Pause polling while typing
+      setIsPollingPausedFromTyping(true);
+      console.log('Polling paused due to typing - waiting for Save button click');
+      
+      // Clear any existing auto-save timer
       if (savingTimeoutRef.current) {
         clearTimeout(savingTimeoutRef.current);
       }
@@ -238,18 +246,20 @@ function TextShareApp() {
       }
       window.userEditingResetTimer = setTimeout(() => {
         userEditingRef.current = false;
+        // Do not resume polling here - we'll wait for the Save button click
       }, 3000); // Reset after 3 seconds of no typing
       
-      savingTimeoutRef.current = setTimeout(() => {
-        handleSave();
-      }, 2000); // Auto-save after 2 seconds of inactivity
+      // Remove auto-save functionality - wait for explicit save button click
+      // savingTimeoutRef.current = setTimeout(() => {
+      //   handleSave();
+      // }, 2000);
       
       // If connected via WebRTC, broadcast to peers
       if (rtcConnected) {
         sendTextToAllPeers(newText);
       }
     }
-  }, [text, serverText, rtcConnected, sendTextToAllPeers, handleTypingStart, showDraft, setDraftText, id]);
+  }, [text, serverText, rtcConnected, sendTextToAllPeers, handleTypingStart, showDraft, setDraftText, id, setIsPollingPausedFromTyping]);
   
   // Handle save operation
   const handleSave = useCallback(async () => {
@@ -283,6 +293,10 @@ function TextShareApp() {
         setLastServerText(tempText);
         setHasChanges(false);
         console.log('Text saved to server');
+        
+        // Resume polling after saving
+        setIsPollingPausedFromTyping(false);
+        console.log('Polling resumed after saving');
         
         // Update online status if it was offline
         if (!isServerOnline) {
@@ -320,6 +334,12 @@ function TextShareApp() {
     if (!id) {
       console.error('Cannot load text: No session ID provided');
       console.trace('Stack trace for missing ID');
+      return;
+    }
+    
+    // Skip loading if polling is paused due to typing
+    if (isPollingPausedFromTyping) {
+      console.log('Skipping text load from server because polling is paused due to typing');
       return;
     }
     
@@ -404,7 +424,7 @@ function TextShareApp() {
         console.error('Error loading from localStorage:', e);
       }
     }
-  }, [id, text, loadedFromServer]);
+  }, [id, text, loadedFromServer, isPollingPausedFromTyping]);
   
   // Function to apply server updates
   const applyUpdates = useCallback(() => {
@@ -479,9 +499,17 @@ function TextShareApp() {
   
   // Set up periodic polling for updates if autoUpdate is enabled
   useEffect(() => {
-    if (!id || isRtcConnected || !autoUpdate) return;
+    if (!id || isRtcConnected || !autoUpdate || isPollingPausedFromTyping) return;
+    
+    console.log('Setting up polling, isPollingPausedFromTyping:', isPollingPausedFromTyping);
     
     const checkInterval = setInterval(() => {
+      // Skip polling if typing has been detected since interval started
+      if (isPollingPausedFromTyping) {
+        console.log('Skipping poll because user is typing');
+        return;
+      }
+      
       loadTextFromServer().then(() => {
         setLastChecked(new Date());
         // Check if there are updates available
@@ -501,7 +529,7 @@ function TextShareApp() {
     }, 10000); // Check every 10 seconds
 
     return () => clearInterval(checkInterval);
-  }, [id, isRtcConnected, autoUpdate, loadTextFromServer, serverText, text, applyUpdates]);
+  }, [id, isRtcConnected, autoUpdate, loadTextFromServer, serverText, text, applyUpdates, isPollingPausedFromTyping]);
   
   // Handle copy to clipboard
   const handleCopy = useCallback(() => {
@@ -745,7 +773,13 @@ function TextShareApp() {
             onSave={handleSave}
             onCopy={handleCopy}
             onShare={handleShare}
-            onRefresh={loadTextFromServer}
+            onRefresh={() => {
+              // If typing is happening, we'll save first then load from server
+              if (isPollingPausedFromTyping && hasChanges) {
+                handleSave();
+              }
+              loadTextFromServer();
+            }}
             showRTCControls={rtcSupported}
             rtcPollingPaused={isRtcPollingPaused}
             rtcStage={rtcStage}
@@ -753,7 +787,7 @@ function TextShareApp() {
             activeUsers={activeUsers}
             connectedPeers={Object.keys(dataChannelStatus || {})}
             setShowShareModal={setShowModal}
-            isPollingPaused={isRtcPollingPaused}
+            isPollingPaused={isRtcPollingPaused || isPollingPausedFromTyping}
             status={hasChanges ? "unsaved" : "saved"}
           />
           
