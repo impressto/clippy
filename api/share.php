@@ -19,7 +19,7 @@ if (in_array($origin, $allowedOrigins)) {
 }
 
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, x-client-id');
+header('Access-Control-Allow-Headers: Content-Type');
 header('Access-Control-Allow-Credentials: true');
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");

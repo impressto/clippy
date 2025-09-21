@@ -10,6 +10,10 @@
   --warning-color: #ffb703;
   --textarea-bg: #ffffff;
   --textarea-text: #212529;
+  --button-bg: #f0f0f0;
+  --button-color: #333;
+  --button-border: #ccc;
+  --button-hover-bg: #e0e0e0;
   /* Hint to browsers about default control theme */
   color-scheme: light;
 }
@@ -26,6 +30,10 @@
   --warning-color: #fbbf24;
   --textarea-bg: #2d2d2d;
   --textarea-text: #e0e0e0;
+  --button-bg: #404040;
+  --button-color: #e0e0e0;
+  --button-border: #666;
+  --button-hover-bg: #505050;
   /* Ensure form controls adopt dark styling where applicable */
   color-scheme: dark;
 }
@@ -820,6 +828,19 @@ textarea::placeholder {
 }
 
 .app-footer a:hover {
+  text-decoration: underline;
+}
+
+.footer-home-link {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-size: 1rem;
+  font-weight: 500;
+  display: inline-block;
+  margin-bottom: 0.5rem;
+}
+
+.footer-home-link:hover {
   text-decoration: underline;
 }
 

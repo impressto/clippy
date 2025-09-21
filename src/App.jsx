@@ -9,6 +9,7 @@ import ControlsBar from './components/ControlsBar.jsx';
 import Footer from './components/Footer.jsx';
 import ShareModal from './components/ShareModal.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
+import Toast from './components/Toast.jsx';
 import { useTheme } from './theme/ThemeContext.jsx';
 import { useWebRTCManager } from './utils/WebRTCSocketManager.js';
 
@@ -74,21 +75,17 @@ function TextShareApp() {
   const [draftText, setDraftText] = useState('');
   const [showDraft, setShowDraft] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('info');
   
   // Refs
   const textAreaRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const isTypingRef = useRef(false);
   const savingTimeoutRef = useRef(null);
-  const clientIdRef = useRef(null);
   const lastActivityTimeRef = useRef(Date.now());
   const userEditingRef = useRef(false);
-  
-  // Generate a client ID if we don't have one
-  if (!clientIdRef.current) {
-    clientIdRef.current = Math.random().toString(36).substring(2, 10);
-    console.log(`Generated client ID: ${clientIdRef.current}`);
-  }
   
   // Initialize WebRTC
   const {
@@ -278,7 +275,6 @@ function TextShareApp() {
     try {
       const headers = new Headers();
       headers.append('Content-Type', 'application/json');
-      headers.append('X-Client-ID', clientIdRef.current);
       
       const response = await fetch(`${API_BASE_URL}/share.php?id=${id}`, {
         method: 'POST',
@@ -345,12 +341,8 @@ function TextShareApp() {
     
     try {
       console.log(`Loading text from server for session ${id}`);
-      const headers = new Headers();
-      headers.append('X-Client-ID', clientIdRef.current || 'unknown');
       
-      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=true`, {
-        headers
-      });
+      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=true`);
       
       if (!response.ok) {
         throw new Error(`Server returned ${response.status}: ${response.statusText}`);
@@ -384,6 +376,25 @@ function TextShareApp() {
         } else if (serverText !== text) {
           // If we already loaded and the server text is different, mark changes
           setHasChanges(true);
+          
+          // Show toast notification for updates if text has changed
+          const serverTextLength = serverText.length;
+          const currentTextLength = text.length;
+          const diffLength = Math.abs(serverTextLength - currentTextLength);
+          const diffPercent = Math.round((diffLength / Math.max(serverTextLength, 1)) * 100);
+          
+          let updateMessage;
+          if (serverTextLength > currentTextLength) {
+            updateMessage = `New content added (+${diffLength} chars, ~${diffPercent}%)`;
+          } else if (serverTextLength < currentTextLength) {
+            updateMessage = `Content updated (${diffLength} chars removed, ~${diffPercent}%)`;
+          } else {
+            updateMessage = 'Content modified (same length)';
+          }
+          
+          setToastMessage(updateMessage);
+          setToastType('info');
+          setShowToast(true);
         }
         
         // Mark as loaded
@@ -452,6 +463,18 @@ function TextShareApp() {
       setUpdatesAvailable(false);
       // Reset editing state after applying updates
       userEditingRef.current = false;
+      
+      // Ensure the toast stays visible for at least 1 second
+      const minimumVisibleTime = 1000; // 1 second
+      
+      // Change toast message to indicate updates were applied
+      setToastMessage('Updates applied successfully');
+      setToastType('success');
+      
+      // Delay hiding the toast to ensure visibility
+      setTimeout(() => {
+        setShowToast(false);
+      }, minimumVisibleTime);
       
       // Clear any existing reset timer
       if (window.userEditingResetTimer) {
@@ -706,6 +729,52 @@ function TextShareApp() {
     alert('Debug information has been logged to the console');
   }, [connectionStatus, activeUsers, rtcSupported, rtcConnected, rtcStage, dataChannelStatus]);
   
+  // Handle toast close
+  const handleToastClose = useCallback(() => {
+    setShowToast(false);
+  }, []);
+  
+  // Handle toast click
+  const handleToastClick = useCallback(() => {
+    const clickTime = Date.now();
+    
+    // Apply updates immediately
+    applyUpdates();
+    
+    // Ensure the toast stays visible for at least 1 second
+    const timeElapsed = Date.now() - clickTime;
+    const minimumVisibleTime = 1000; // 1 second
+    
+    if (timeElapsed < minimumVisibleTime) {
+      // Keep toast visible temporarily
+      setTimeout(() => {
+        setShowToast(false);
+      }, minimumVisibleTime - timeElapsed);
+    } else {
+      setShowToast(false);
+    }
+  }, [applyUpdates]);
+  
+  // Handle test toast (for testing purposes)
+  const handleTestToast = useCallback(() => {
+    const testMessages = [
+      'New content added (+15 chars, ~5%)',
+      'Content updated (8 chars removed, ~3%)',
+      'Content modified (same length)',
+      'Test toast notification - Click to dismiss',
+      'This is a longer test message to see how the toast handles more text content in the notification area'
+    ];
+    
+    const randomMessage = testMessages[Math.floor(Math.random() * testMessages.length)];
+    const randomType = Math.random() > 0.5 ? 'info' : 'success';
+    
+    setToastMessage(randomMessage);
+    setToastType(randomType);
+    setShowToast(true);
+    
+    console.log('Test toast triggered:', randomMessage);
+  }, []);
+  
   // Render
   return (
     <div className={`app-container ${theme}`}>
@@ -741,6 +810,8 @@ function TextShareApp() {
             lastChecked={lastChecked}
             text={text}
             serverText={serverText}
+            isRtcConnected={isRtcConnected}
+            onTestToast={handleTestToast}
           />
           
           <TextAreaContainer
@@ -801,6 +872,16 @@ function TextShareApp() {
               rtcConnected={isRtcConnected}
             />
           )}
+          
+          {/* Toast notification for updates */}
+          <Toast 
+            message={toastMessage}
+            type={toastType}
+            show={showToast}
+            onClose={handleToastClose}
+            onClick={handleToastClick}
+            duration={5000}
+          />
         </>
       )}
     </div>
