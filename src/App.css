@@ -50,6 +50,7 @@ body.dark-theme {
   background-color: #121212;
 }
 
+
 .app-header {
   display: flex;
   align-items: center;
@@ -57,6 +58,11 @@ body.dark-theme {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+/* Center AppHeader only on landing page */
+.landing-header-centered {
+  justify-content: center !important;
 }
 
 .app-title {
@@ -275,7 +281,7 @@ body.dark-theme {
 }
 
 .home-container h1 {
-  font-size: 1.5rem;
+  font-size: 1.6em;
   color: var(--primary-color);
   margin: 0;
 }
@@ -342,7 +348,7 @@ body.dark-theme {
 }
 
 .text-share-container h1 {
-  font-size: 1.5rem;
+  font-size: 1.6em;
   color: var(--primary-color);
   margin: 0.5rem 0 1.5rem 0;
 }
@@ -839,6 +845,7 @@ textarea::placeholder {
 }
 
 .error-container h1 {
+  font-size: 1.6em;
   color: var(--error-color);
   margin-bottom: 1rem;
 }
