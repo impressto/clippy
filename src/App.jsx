@@ -11,7 +11,7 @@ import ShareModal from './components/ShareModal.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
 import Toast from './components/Toast.jsx';
 import { useTheme } from './theme/ThemeContext.jsx';
-import { useWebRTCManager } from './utils/WebRTCSocketManager.js';
+// import { useWebRTCManager } from './utils/WebRTCSocketManager.js'; // TEMPORARILY DISABLED
 
 // Constants
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -87,28 +87,40 @@ function TextShareApp() {
   const lastActivityTimeRef = useRef(Date.now());
   const userEditingRef = useRef(false);
   
-  // Initialize WebRTC
-  const {
-    rtcSupported,
-    rtcConnected,
-    connectionStatus,
-    activeUsers,
-    dataChannelStatus,
-    setDebugMode,
-    webRtcConnectionStage: rtcStage,
-    isPollingPaused: rtcPollingPaused,
-    sendTextToAllPeers,
-    initiatePeerConnections
-  } = useWebRTCManager(
-    id,
-    text,
-    setText,
-    setSavedText,
-    setServerText,
-    setLastServerText,
-    setHasChanges,
-    isTypingRef.current
-  );
+  // Initialize WebRTC - TEMPORARILY DISABLED to focus on share.php polling
+  // const {
+  //   rtcSupported,
+  //   rtcConnected,
+  //   connectionStatus,
+  //   activeUsers,
+  //   dataChannelStatus,
+  //   setDebugMode,
+  //   webRtcConnectionStage: rtcStage,
+  //   isPollingPaused: rtcPollingPaused,
+  //   sendTextToAllPeers,
+  //   initiatePeerConnections
+  // } = useWebRTCManager(
+  //   id,
+  //   text,
+  //   setText,
+  //   setSavedText,
+  //   setServerText,
+  //   setLastServerText,
+  //   setHasChanges,
+  //   isTypingRef.current
+  // );
+  
+  // Placeholder values for disabled WebRTC
+  const rtcSupported = false;
+  const rtcConnected = false;
+  const connectionStatus = 'disabled';
+  const activeUsers = 1;
+  const dataChannelStatus = {};
+  const setDebugMode = () => {};
+  const rtcStage = 'disabled';
+  const rtcPollingPaused = false;
+  const sendTextToAllPeers = () => {};
+  const initiatePeerConnections = () => {};
   
   // Update our state when WebRTCSocketManager state changes
   useEffect(() => {
@@ -251,12 +263,12 @@ function TextShareApp() {
       //   handleSave();
       // }, 2000);
       
-      // If connected via WebRTC, broadcast to peers
-      if (rtcConnected) {
-        sendTextToAllPeers(newText);
-      }
+      // WebRTC disabled - no need to broadcast to peers
+      // if (rtcConnected) {
+      //   sendTextToAllPeers(newText);
+      // }
     }
-  }, [text, serverText, rtcConnected, sendTextToAllPeers, handleTypingStart, showDraft, setDraftText, id, setIsPollingPausedFromTyping]);
+  }, [text, serverText, handleTypingStart, showDraft, setDraftText, id, setIsPollingPausedFromTyping]);
   
   // Handle save operation
   const handleSave = useCallback(async () => {
@@ -369,11 +381,16 @@ function TextShareApp() {
         setLastServerText(serverText);
         
         // Only update the text if we haven't loaded yet or user isn't editing
-        if (!loadedFromServer || !userEditingRef.current) {
+        if (!loadedFromServer) {
+          console.log('Auto-applying server text - first load (loadedFromServer:', loadedFromServer, ')');
           setText(serverText);
           setSavedText(serverText);
           setHasChanges(false);
         } else if (serverText !== text) {
+          console.log('Server text differs from current text - showing toast');
+          console.log('Server text length:', serverText.length, 'Current text length:', text.length);
+          console.log('loadedFromServer:', loadedFromServer, 'userEditingRef.current:', userEditingRef.current);
+          
           // If we already loaded and the server text is different, mark changes
           setHasChanges(true);
           
@@ -392,9 +409,12 @@ function TextShareApp() {
             updateMessage = 'Content modified (same length)';
           }
           
+          console.log('Toast message:', updateMessage);
           setToastMessage(updateMessage);
           setToastType('info');
           setShowToast(true);
+        } else {
+          console.log('No action needed - server text matches current text');
         }
         
         // Mark as loaded
@@ -522,9 +542,12 @@ function TextShareApp() {
   
   // Set up periodic polling for updates if autoUpdate is enabled
   useEffect(() => {
-    if (!id || isRtcConnected || !autoUpdate || isPollingPausedFromTyping) return;
+    // For now, ignore WebRTC connection status and focus on share.php polling
+    // TODO: Re-enable WebRTC condition when socket server is running
+    // if (!id || isRtcConnected || !autoUpdate || isPollingPausedFromTyping) return;
+    if (!id || !autoUpdate || isPollingPausedFromTyping) return;
     
-    console.log('Setting up polling, isPollingPausedFromTyping:', isPollingPausedFromTyping);
+    console.log('Setting up polling, isPollingPausedFromTyping:', isPollingPausedFromTyping, 'isRtcConnected:', isRtcConnected);
     
     const checkInterval = setInterval(() => {
       // Skip polling if typing has been detected since interval started
@@ -552,7 +575,7 @@ function TextShareApp() {
     }, 10000); // Check every 10 seconds
 
     return () => clearInterval(checkInterval);
-  }, [id, isRtcConnected, autoUpdate, loadTextFromServer, serverText, text, applyUpdates, isPollingPausedFromTyping]);
+  }, [id, autoUpdate, loadTextFromServer, serverText, text, applyUpdates, isPollingPausedFromTyping]);
   
   // Handle copy to clipboard
   const handleCopy = useCallback(() => {
