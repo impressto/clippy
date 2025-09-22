@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faSync, faShare, faUsers, faUserPlus, faUserMinus } from '@fortawesome/free-solid-svg-icons';
+import { faSave, faSync, faShare, faUserPlus, faUserMinus, faUsers } from '@fortawesome/free-solid-svg-icons';
 import './ControlsBar.css'; // Import the CSS for WebRTC status styles
 
 /**
@@ -25,7 +25,9 @@ const ControlsBar = ({
   webRtcConnectionStage,
   startPeerSearch,
   disconnectPeers,
-  peerDiscoveryEnabled
+  peerDiscoveryEnabled,
+  setPeerDiscoveryEnabled,
+  isWebRTCActive // Hide check updates button when WebRTC is connecting/connected
 }) => {
   // Function to get WebRTC status message based on the connection stage
   const getRtcStatusMessage = () => {
@@ -72,23 +74,13 @@ const ControlsBar = ({
           {activeUsers > 1 ? "Save Permanently" : "Save Changes"}
         </button>
         
-        {!isRtcConnected && (
+        {!isWebRTCActive && (
           <button 
             className="check-updates-button"
             onClick={onRefresh}
             title="Check for updates now"
           >
             <FontAwesomeIcon icon={faSync} className="button-icon" /> Check Updates
-          </button>
-        )}
-        
-        {rtcSupported && !isRtcConnected && (
-          <button 
-            className="connect-peers-button"
-            onClick={() => window.initiatePeerConnections && window.initiatePeerConnections()}
-            title="Connect to peers using WebRTC"
-          >
-            <FontAwesomeIcon icon={faUsers} className="button-icon" /> Connect to Peers
           </button>
         )}
         

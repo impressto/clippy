@@ -15,7 +15,7 @@ import { useTextManager } from './hooks/useTextManager.js';
 import { useDraftManager } from './hooks/useDraftManager.js';
 import { useTypingDetection } from './hooks/useTypingDetection.js';
 import { useServerPolling } from './hooks/useServerPolling.js';
-// import { useWebRTCManager } from './utils/WebRTCSocketManager.js'; // TEMPORARILY DISABLED
+import { useWebRTCManager } from './utils/WebRTCSocketManager.js';
 
 // Constants
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -68,6 +68,7 @@ function TextShareApp() {
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [socketClients, setSocketClients] = useState(0);
   const [isPollingPausedFromTyping, setIsPollingPausedFromTyping] = useState(false);
+  const [isWebRTCActive, setIsWebRTCActive] = useState(false); // Controls UI visibility and polling when WebRTC is connecting/connected
   const [autoUpdate, setAutoUpdate] = useState(() => {
     // Load from localStorage if available
     const saved = localStorage.getItem('autoUpdate');
@@ -111,48 +112,52 @@ function TextShareApp() {
     saveDraft,
     deleteDraft,
     applyDraft,
-    toggleShowDraft
-  } = useDraftManager(id, text, setText, setHasChanges, setSavedText, setShowDraft, userEditingRef);
+    loadDraft
+  } = useDraftManager({
+    id,
+    text,
+    setText,
+    setSavedText,
+    setHasChanges,
+    MAX_STORAGE_SIZE
+  });
+  
+  // Toggle draft visibility
+  const toggleShowDraft = useCallback(() => {
+    setShowDraft(prev => !prev);
+  }, []);
   
   // Refs for activity tracking
   const lastActivityTimeRef = useRef(Date.now());
   
-  // Initialize WebRTC - TEMPORARILY DISABLED to focus on share.php polling
-  // const {
-  //   rtcSupported,
-  //   rtcConnected,
-  //   connectionStatus,
-  //   activeUsers,
-  //   dataChannelStatus,
-  //   setDebugMode,
-  //   webRtcConnectionStage: rtcStage,
-  //   isPollingPaused: rtcPollingPaused,
-  //   sendTextToAllPeers,
-  //   initiatePeerConnections
-  // } = useWebRTCManager(
-  //   id,
-  //   text,
-  //   setText,
-  //   setSavedText,
-  //   setServerText,
-  //   setLastServerText,
-  //   setHasChanges,
-  //   isTypingRef.current
-  // );
-  
-  // Detect WebRTC support properly
-  const rtcSupported = typeof window !== 'undefined' && !!window.RTCPeerConnection;
-  
-  // Placeholder values for disabled WebRTC functionality
-  const rtcConnected = false;
-  const connectionStatus = 'disabled';
-  const activeUsers = 1;
-  const dataChannelStatus = {};
-  const setDebugMode = () => {};
-  const rtcStage = 'disabled';
-  const rtcPollingPaused = false;
-  const sendTextToAllPeers = () => {};
-  const initiatePeerConnections = () => {};
+    // Initialize WebRTC manager
+  const {
+    rtcSupported,
+    rtcConnected,
+    connectionStatus,
+    activeUsers,
+    dataChannelStatus,
+    setDebugMode,
+    webRtcConnectionStage: rtcStage,
+    isPollingPaused: rtcPollingPaused,
+    sendTextToAllPeers,
+    initiatePeerConnections,
+    peerDiscoveryEnabled,
+    setPeerDiscoveryEnabled,
+    startPeerSearch,
+    disconnectPeers,
+    debugMode,
+    debugData
+  } = useWebRTCManager(
+    id,
+    text,
+    setText,
+    setSavedText,
+    setServerText,
+    setLastServerText,
+    setHasChanges,
+    isTypingRef.current
+  );
   
   // Update our state when WebRTCSocketManager state changes
   useEffect(() => {
@@ -160,6 +165,14 @@ function TextShareApp() {
       setIsRtcConnected(rtcConnected);
     }
   }, [rtcConnected]);
+  
+  // Update WebRTC active state when peer discovery is enabled or peers are connected
+  useEffect(() => {
+    // WebRTC is considered "active" when peer discovery is enabled (connecting) or when connected to peers
+    const webRTCActive = peerDiscoveryEnabled || rtcConnected;
+    setIsWebRTCActive(webRTCActive);
+    console.log('WebRTC active state changed:', webRTCActive, { peerDiscoveryEnabled, rtcConnected });
+  }, [peerDiscoveryEnabled, rtcConnected]);
   
   useEffect(() => {
     if (rtcPollingPaused !== undefined) {
@@ -477,7 +490,7 @@ function TextShareApp() {
   useServerPolling({
     id,
     autoUpdate,
-    isPollingPausedFromTyping,
+    isPollingPausedFromTyping: isPollingPausedFromTyping || isWebRTCActive, // Pause polling when typing OR when WebRTC is active
     loadTextFromServer,
     serverText,
     text,
@@ -633,6 +646,7 @@ function TextShareApp() {
             text={text}
             serverText={serverText}
             isRtcConnected={isRtcConnected}
+            isWebRTCActive={isWebRTCActive}
           />
           
           <TextAreaContainer
@@ -682,6 +696,12 @@ function TextShareApp() {
             setShowShareModal={setShowModal}
             isPollingPaused={isRtcPollingPaused || isPollingPausedFromTyping}
             status={hasChanges ? "unsaved" : "saved"}
+            isWebRTCActive={isWebRTCActive}
+            // WebRTC peer connection functions
+            startPeerSearch={startPeerSearch}
+            disconnectPeers={disconnectPeers}
+            peerDiscoveryEnabled={peerDiscoveryEnabled}
+            setPeerDiscoveryEnabled={setPeerDiscoveryEnabled}
           />
           
           <Footer />

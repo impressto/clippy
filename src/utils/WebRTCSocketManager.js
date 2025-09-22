@@ -68,7 +68,10 @@ export const useWebRTCManager = (
   
   // Function to announce presence to all active users in the session
   const sendPresenceAnnouncement = useCallback((force = false) => {
-    if (!id || !clientIdRef.current) return;
+    if (!id || !clientIdRef.current) {
+      console.warn('Cannot send presence announcement: missing ID or client ID');
+      return;
+    }
     
     // Only send presence announcements if peer discovery is enabled
     if (!peerDiscoveryEnabledRef.current && !force) {
@@ -76,8 +79,11 @@ export const useWebRTCManager = (
       return;
     }
     
-    console.log(`Sending presence announcement to find other clients`);
-    socketAdapter.sendPresenceAnnouncement();
+    console.log('Sending presence announcement');
+    const success = socketAdapter.sendPresenceAnnouncement();
+    if (!success) {
+      console.error('Failed to send presence announcement');
+    }
   }, [id]);
   
   // Initialize client ID and socket connection on component mount
@@ -155,16 +161,10 @@ export const useWebRTCManager = (
   // Join session when ID changes
   useEffect(() => {
     if (id && clientIdRef.current && rtcSupported) {
-      console.log(`Joining session ${id}`);
-      socketAdapter.joinSession(id, clientIdRef.current);
-      
-      // Start peer discovery automatically when joining a session
-      if (peerDiscoveryEnabled) {
-        console.log('Automatically starting peer discovery');
-        sendPresenceAnnouncement(true);
-      } else {
-        console.log('Setting peer discovery enabled');
-        setPeerDiscoveryEnabled(true);
+      console.log(`Joining session ${id} (WebRTC passive mode)`);
+      const joinResult = socketAdapter.joinSession(id, clientIdRef.current);
+      if (!joinResult) {
+        console.warn('Failed to join session');
       }
     }
     
@@ -173,7 +173,7 @@ export const useWebRTCManager = (
         socketAdapter.leaveSession();
       }
     };
-  }, [id, rtcSupported, peerDiscoveryEnabled, sendPresenceAnnouncement]);
+  }, [id, rtcSupported]);
   
   // Update typing state ref when the prop changes
   useEffect(() => {
@@ -672,6 +672,17 @@ export const useWebRTCManager = (
   const startPeerSearch = useCallback(() => {
     if (!peerDiscoveryEnabled && rtcSupported && clientIdRef.current) {
       console.log('User initiated WebRTC peer discovery');
+      
+      // Ensure session is joined before starting peer discovery
+      if (!socketAdapter.sessionId && id) {
+        console.log('Session not joined, joining now...');
+        const joinResult = socketAdapter.joinSession(id, clientIdRef.current);
+        if (!joinResult) {
+          console.error('Failed to join session for peer discovery');
+          return;
+        }
+      }
+      
       setPeerDiscoveryEnabled(true);
       setWebRtcConnectionStage('discovering');
       
@@ -683,7 +694,7 @@ export const useWebRTCManager = (
       // Force a presence announcement to discover peers
       sendPresenceAnnouncement(true);
     }
-  }, [rtcSupported, peerDiscoveryEnabled, handlePeerDisconnect, sendPresenceAnnouncement]);
+  }, [rtcSupported, peerDiscoveryEnabled, handlePeerDisconnect, sendPresenceAnnouncement, id]);
   
   // Function to disconnect from peers and disable peer discovery
   const disconnectPeers = useCallback(() => {

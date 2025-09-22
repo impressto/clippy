@@ -1,126 +1,119 @@
-// useDraftManager.js - Custom hook to manage draft functionality
-import { useState, useCallback, useEffect } from 'react';
+// useDraftManager.js - Custom hook to manage draft text functionality
+import { useState, useCallback } from 'react';
 
 /**
- * Custom hook to manage draft text functionality
+ * Custom hook to manage draft text functionality and localStorage persistence
  * 
- * @param {string} id - Session ID
- * @param {string} text - Current main text
- * @param {function} setText - Function to update main text
- * @param {function} setHasChanges - Function to mark text as changed
- * @param {function} setSavedText - Function to update saved text
- * @param {function} setShowDraft - Function to control draft view
- * @param {Object} userEditingRef - Ref to track user editing state
+ * @param {Object} config - Configuration object
+ * @param {string} config.id - Session ID for the draft storage key
+ * @param {string} config.text - Current text value
+ * @param {function} config.setText - Function to update text value
+ * @param {function} config.setSavedText - Function to update saved text value
+ * @param {function} config.setHasChanges - Function to update hasChanges state
+ * @param {number} config.MAX_STORAGE_SIZE - Maximum storage size limit
  * @returns {Object} Draft management state and functions
  */
-export const useDraftManager = (id, text, setText, setHasChanges, setSavedText, setShowDraft, userEditingRef) => {
-  // Draft state
+export const useDraftManager = ({
+  id,
+  text,
+  setText,
+  setSavedText,
+  setHasChanges,
+  MAX_STORAGE_SIZE
+}) => {
+  // State for draft functionality
   const [draftText, setDraftText] = useState('');
   const [hasDraft, setHasDraft] = useState(false);
-  const [showDraft, setShowDraftInternal] = useState(false);
+  
+  // Generate draft storage key
+  const getDraftKey = useCallback(() => {
+    return `draft_${id}`;
+  }, [id]);
   
   // Handle draft text changes
-  const handleDraftChange = useCallback((newText) => {
-    setDraftText(newText);
-    
-    // Save draft to localStorage
-    if (id) {
-      localStorage.setItem(`clippy_draft_${id}`, newText);
-    }
-  }, [id]);
+  const handleDraftChange = useCallback((value) => {
+    setDraftText(value);
+  }, []);
   
-  // Save current text as draft
+  // Save draft to localStorage
   const saveDraft = useCallback(() => {
-    setDraftText(text);
-    setHasDraft(true);
+    if (!id || !draftText.trim()) return;
     
-    // Save draft to localStorage for persistence
-    if (id) {
-      localStorage.setItem(`clippy_draft_${id}`, text);
+    try {
+      // Check storage size
+      const draftData = JSON.stringify({ text: draftText, timestamp: Date.now() });
+      if (draftData.length > MAX_STORAGE_SIZE) {
+        console.warn('Draft too large for localStorage');
+        return;
+      }
+      
+      localStorage.setItem(getDraftKey(), draftData);
+      setHasDraft(true);
+      console.log('Draft saved to localStorage');
+    } catch (error) {
+      console.error('Error saving draft:', error);
     }
-    
-    // Show a confirmation message
-    alert('Draft saved. You can access it from the "My Draft" tab.');
-  }, [text, id]);
+  }, [id, draftText, getDraftKey, MAX_STORAGE_SIZE]);
   
-  // Delete draft
+  // Delete draft from localStorage
   const deleteDraft = useCallback(() => {
-    // Confirm deletion
-    if (window.confirm('Are you sure you want to delete your draft?')) {
+    if (!id) return;
+    
+    try {
+      localStorage.removeItem(getDraftKey());
       setDraftText('');
       setHasDraft(false);
-      setShowDraftInternal(false);
-      setShowDraft(false);
-      
-      // Remove from localStorage
-      if (id) {
-        localStorage.removeItem(`clippy_draft_${id}`);
-      }
+      console.log('Draft deleted from localStorage');
+    } catch (error) {
+      console.error('Error deleting draft:', error);
     }
-  }, [id, setShowDraft]);
+  }, [id, getDraftKey]);
   
-  // Apply draft text to main text
+  // Apply draft to current text
   const applyDraft = useCallback(() => {
-    console.log('Applying draft text:', draftText);
+    if (!draftText.trim()) return;
     
-    if (draftText && draftText.trim().length > 0) {
-      console.log('Setting text to draft text');
-      
-      // Set text to the draft value
-      setText(draftText);
-      
-      // Update other state
-      setHasChanges(true);  // Always mark as having changes
-      setSavedText(text);   // Store the previous text value
-      setShowDraftInternal(false);  // Switch back to main text view
-      setShowDraft(false);  
-      
-      // Update editing state
-      userEditingRef.current = true;
-      
-      // Reset editing timer
-      if (window.userEditingResetTimer) {
-        clearTimeout(window.userEditingResetTimer);
-      }
-      window.userEditingResetTimer = setTimeout(() => {
-        userEditingRef.current = false;
-      }, 3000);
-      
-      console.log('Draft text applied to main text area');
-    } else {
-      console.log('Cannot apply draft: empty or undefined');
-    }
-  }, [draftText, text, setText, setHasChanges, setSavedText, setShowDraft, userEditingRef]);
+    setText(draftText);
+    setSavedText(draftText);
+    setHasChanges(false);
+    
+    // Clear the draft after applying
+    deleteDraft();
+    
+    console.log('Draft applied to current text');
+  }, [draftText, setText, setSavedText, setHasChanges, deleteDraft]);
   
-  // Load draft from localStorage on initial load
-  useEffect(() => {
-    if (id) {
-      const savedDraft = localStorage.getItem(`clippy_draft_${id}`);
+  // Load draft from localStorage on mount
+  const loadDraft = useCallback(() => {
+    if (!id) return;
+    
+    try {
+      const draftKey = getDraftKey();
+      const savedDraft = localStorage.getItem(draftKey);
+      
       if (savedDraft) {
-        setDraftText(savedDraft);
+        const draftData = JSON.parse(savedDraft);
+        setDraftText(draftData.text || '');
         setHasDraft(true);
+        console.log('Draft loaded from localStorage');
+      } else {
+        setHasDraft(false);
       }
+    } catch (error) {
+      console.error('Error loading draft:', error);
+      setHasDraft(false);
     }
-  }, [id]);
-  
-  // Sync internal showDraft state with external
-  const toggleShowDraft = useCallback((show) => {
-    setShowDraftInternal(show);
-    setShowDraft(show);
-  }, [setShowDraft]);
+  }, [id, getDraftKey]);
   
   return {
-    // State
     draftText,
     setDraftText,
     hasDraft,
-    showDraft: showDraft,
-    
-    // Functions
+    setHasDraft,
     handleDraftChange,
     saveDraft,
     deleteDraft,
     applyDraft,
-    toggleShowDraft
+    loadDraft
   };
 };

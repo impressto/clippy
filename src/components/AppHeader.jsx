@@ -16,7 +16,8 @@ const AppHeader = ({
   lastChecked = null, 
   text = '', 
   serverText = '',
-  isRtcConnected = true
+  isRtcConnected = true,
+  isWebRTCActive = false // Hide polling-related UI when WebRTC is connecting/connected
 }) => {
   return (
     <div className="app-header">
@@ -26,7 +27,7 @@ const AppHeader = ({
         <ThemeToggle />
       </div>
       
-      {!isRtcConnected && (
+      {!isWebRTCActive && (
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginRight: '0.75rem' }}>
             <input 
