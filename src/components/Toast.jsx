@@ -33,7 +33,6 @@ const Toast = ({ message, type = 'info', show, onClose, onClick, duration = 3000
         {type === 'warning' && <span role="img" aria-label="warning">⚠️ </span>}
         {type === 'error' && <span role="img" aria-label="error">❌ </span>}
         {message}
-        {onClick && <span className="toast-action-hint"> (Click to apply)</span>}
       </div>
       <button 
         className="toast-close" 

@@ -16,8 +16,7 @@ const AppHeader = ({
   lastChecked = null, 
   text = '', 
   serverText = '',
-  isRtcConnected = true,
-  onTestToast = () => {}
+  isRtcConnected = true
 }) => {
   return (
     <div className="app-header">
@@ -37,34 +36,6 @@ const AppHeader = ({
             />
             <span style={{ fontSize: '0.85rem' }}>Auto-load updates</span>
           </label>
-          
-          {/* Test Toast Button - Only show in development */}
-          {import.meta.env.DEV && (
-            <button 
-              className="test-toast-button"
-              onClick={onTestToast}
-              style={{ 
-                marginRight: '0.75rem',
-                padding: '4px 8px',
-                fontSize: '0.8rem',
-                background: 'var(--button-bg, #f0f0f0)',
-                color: 'var(--button-color, #333)',
-                border: '1px solid var(--button-border, #ccc)',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-              title="Test toast notification"
-              onMouseOver={(e) => {
-                e.target.style.background = 'var(--button-hover-bg, #e0e0e0)';
-              }}
-              onMouseOut={(e) => {
-                e.target.style.background = 'var(--button-bg, #f0f0f0)';
-              }}
-            >
-              <FontAwesomeIcon icon={faFlask} className="button-icon" /> Test Toast
-            </button>
-          )}
         
           {updatesAvailable ? (
           <div className="header-updates">

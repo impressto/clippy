@@ -400,13 +400,12 @@ function TextShareApp() {
           const serverTextLength = serverText.length;
           const currentTextLength = text.length;
           const diffLength = Math.abs(serverTextLength - currentTextLength);
-          const diffPercent = Math.round((diffLength / Math.max(currentTextLength, 1)) * 100);
           
           let updateMessage;
           if (serverTextLength > currentTextLength) {
-            updateMessage = `New content added (+${diffLength} chars, ~${diffPercent}%)`;
+            updateMessage = `Content updated (+${diffLength} chars)`;
           } else if (serverTextLength < currentTextLength) {
-            updateMessage = `Content updated (${diffLength} chars removed, ~${diffPercent}%)`;
+            updateMessage = `Content updated (${diffLength} chars removed.)`;
           } else {
             updateMessage = 'Content modified (same length)';
           }
@@ -780,26 +779,6 @@ function TextShareApp() {
     }
   }, [applyUpdates]);
   
-  // Handle test toast (for testing purposes)
-  const handleTestToast = useCallback(() => {
-    const testMessages = [
-      'New content added (+15 chars, ~5%)',
-      'Content updated (8 chars removed, ~3%)',
-      'Content modified (same length)',
-      'Test toast notification - Click to dismiss',
-      'This is a longer test message to see how the toast handles more text content in the notification area'
-    ];
-    
-    const randomMessage = testMessages[Math.floor(Math.random() * testMessages.length)];
-    const randomType = Math.random() > 0.5 ? 'info' : 'success';
-    
-    setToastMessage(randomMessage);
-    setToastType(randomType);
-    setShowToast(true);
-    
-    console.log('Test toast triggered:', randomMessage);
-  }, []);
-  
   // Render
   return (
     <div className={`app-container ${theme}`}>
@@ -836,7 +815,6 @@ function TextShareApp() {
             text={text}
             serverText={serverText}
             isRtcConnected={isRtcConnected}
-            onTestToast={handleTestToast}
           />
           
           <TextAreaContainer
