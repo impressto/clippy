@@ -391,14 +391,16 @@ function TextShareApp() {
           console.log('Server text length:', serverText.length, 'Current text length:', text.length);
           console.log('loadedFromServer:', loadedFromServer, 'userEditingRef.current:', userEditingRef.current);
           
-          // If we already loaded and the server text is different, mark changes
-          setHasChanges(true);
+          // Update the text area immediately to show the new content
+          setText(serverText);
+          setSavedText(serverText);
+          setHasChanges(false);
           
           // Show toast notification for updates if text has changed
           const serverTextLength = serverText.length;
           const currentTextLength = text.length;
           const diffLength = Math.abs(serverTextLength - currentTextLength);
-          const diffPercent = Math.round((diffLength / Math.max(serverTextLength, 1)) * 100);
+          const diffPercent = Math.round((diffLength / Math.max(currentTextLength, 1)) * 100);
           
           let updateMessage;
           if (serverTextLength > currentTextLength) {
