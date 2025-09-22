@@ -1,6 +1,6 @@
 <?php
 /**
- * Clippy - Text Sharing Application
+ * Clippy - The Shared Clipboard
  * 
  * This file serves as the entry point for the Clippy application.
  * It loads the built React application and handles proper routing.

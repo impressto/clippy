@@ -1,0 +1,49 @@
+
+I have a socket server node script located on my local machine at:
+/home/impressto/work/impressto/homeserver/www/homelab/clippy/socket-server/server.js
+
+it can be started with the command "npm start"
+
+
+I want to serve it though a cloudflare tunnel. I already have cloudflare and am using if for some php pages (served thru nginx).
+
+for this socket server, I do not want to use nginnx.
+
+Can you show me what to do to have this socket server running persistently from my machine via cloudflare?
+
+////////////////
+
+
+npm install -g pm2
+
+
+Start your server:
+
+cd /home/impressto/work/impressto/homeserver/www/homelab/clippy/socket-server
+pm2 start server.js --name clippy-socket
+
+
+Save the process list (so it restarts on reboot):
+
+pm2 save
+pm2 startup
+
+then run the command it gives you.  e.g:
+
+sudo env PATH=$PATH:/home/impressto/.nvm/versions/node/v22.19.0/bin /home/impressto/.nvm/versions/node/v22.19.0/lib/node_modules/pm2/bin/pm2 startup systemd -u impressto --hp /home/impressto
+
+
+
+Example config:
+
+tunnel: clippy-socket
+credentials-file: /home/YOURUSER/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: socket.impressto.ca
+    service: http://localhost:3000   # replace with the port your server.js listens on
+  - service: http_status:404
+  
+  
+cloudflared tunnel route dns clippy-socket socket.yourdomain.com
+  

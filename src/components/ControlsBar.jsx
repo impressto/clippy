@@ -128,7 +128,6 @@ const ControlsBar = ({
             · <span className={getRtcStatusClass()}>{getRtcStatusMessage()}</span> 
             <FontAwesomeIcon icon={faUsers} /> 
             ({connectedPeers.length} other client{connectedPeers.length !== 1 ? 's' : ''})
-            {isPollingPaused && <span className="polling-paused"> · Server polling paused (click Save to resume)</span>}
           </span>
         )}
         
@@ -155,7 +154,7 @@ const ControlsBar = ({
         {lastChecked && !isRtcConnected && !isPollingPaused && (
           <span className="last-checked"> · Last checked: {lastChecked.toLocaleTimeString()}{!updatesAvailable && ' (no updates)'}</span>
         )}
-        {!isRtcConnected && isPollingPaused && (
+        {!isRtcConnected && !isWebRTCActive && isPollingPaused && (
           <span className="polling-paused"> · Polling paused (click Save to resume)</span>
         )}
       </div>
