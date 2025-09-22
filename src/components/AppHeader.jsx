@@ -23,7 +23,7 @@ const AppHeader = ({
     <div className="app-header">
       <div className="app-title">
         <img src={LOGO_URL} alt="Clippy Logo" className="app-logo" />
-        <h1>Clippy</h1>
+        <h1>Clippy - The Shared Clipboard</h1>
         <ThemeToggle />
       </div>
       
