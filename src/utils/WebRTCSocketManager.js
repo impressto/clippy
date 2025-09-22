@@ -201,6 +201,9 @@ export const useWebRTCManager = (
       console.log(`Updating active users count from ${activeUsers} to ${totalUsers} (based on WebRTC connections)`);
       setActiveUsers(totalUsers);
     }
+    
+    // If no WebRTC connections and peer discovery is disabled, we might need to rely on socket server count
+    // This will be updated the next time the socket server sends a session update
   }, [activeUsers]);
 
   const updateRtcConnectionStatus = useCallback(() => {
@@ -544,8 +547,10 @@ export const useWebRTCManager = (
       delete pendingIceCandidatesRef.current[peerId];
     }
     
-    // Update connection status
-    updateRtcConnectionStatus();
+    // Update connection status with a small delay to ensure cleanup is complete
+    setTimeout(() => {
+      updateRtcConnectionStatus();
+    }, 50);
   }, [updateRtcConnectionStatus]);
   
   // Handle text updates received from peers
@@ -708,6 +713,18 @@ export const useWebRTCManager = (
         sendSignal(peerId, { type: 'bye' });
         handlePeerDisconnect(peerId);
       });
+      
+      // Reset active users count to socket server count when disconnecting from WebRTC
+      // This will be updated by the next session update from the socket server
+      setActiveUsers(1); // Reset to 1 (just this client) until socket server updates
+      
+      // Send a presence announcement to trigger session update from socket server
+      // This helps other clients get updated user counts
+      setTimeout(() => {
+        if (socketAdapter.isConnected) {
+          socketAdapter.sendPresenceAnnouncement();
+        }
+      }, 100);
     }
   }, [peerDiscoveryEnabled, handlePeerDisconnect, sendSignal]);
   
