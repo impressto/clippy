@@ -81,10 +81,8 @@ function TextShareApp() {
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('info');
 
-  // Temporary state for text that WebRTC needs 
-  const [currentText, setCurrentText] = useState('');
-  const [currentSavedText, setCurrentSavedText] = useState('');
-  const [currentHasChanges, setCurrentHasChanges] = useState(false);
+  // Ref to store the updateTextFromExternal function for WebRTC
+  const updateTextFromExternalRef = useRef(null);
 
   // WebRTC connection management 
   const {
@@ -109,13 +107,14 @@ function TextShareApp() {
     isPollingPaused
   } = useWebRTCManager(
     id,
-    currentText,
-    setCurrentText,
-    setCurrentSavedText,
-    setServerText,
-    setLastServerText,
-    setCurrentHasChanges,
-    isTypingRef.current
+    '', // Don't pass current text to avoid feedback loops
+    () => {}, // Don't pass setText to avoid feedback loops
+    () => {}, // Don't pass setSavedText to avoid feedback loops
+    () => {}, // Don't pass setServerText to avoid feedback loops
+    () => {}, // Don't pass setLastServerText to avoid feedback loops
+    () => {}, // Don't pass setHasChanges to avoid feedback loops
+    isTypingRef.current,
+    (text) => updateTextFromExternalRef.current?.(text)  // Use ref that will be set later
   );
   
   // Text management hook
@@ -138,42 +137,11 @@ function TextShareApp() {
     MAX_TEXT_LENGTH,
     setIsPollingPausedFromTyping,
     handleTypingStart,
-    broadcastTextToAllPeers: isRtcConnected ? sendTextToAllPeers : null
+    broadcastTextToAllPeers: rtcConnected ? sendTextToAllPeers : null
   });
 
-  // Keep currentText in sync with text from text manager
-  useEffect(() => {
-    setCurrentText(text);
-  }, [text]);
-
-  // Keep text manager in sync with WebRTC text updates
-  useEffect(() => {
-    if (currentText !== text) {
-      setText(currentText);
-    }
-  }, [currentText, text, setText]);
-
-  // Keep savedText in sync between WebRTC and text manager
-  useEffect(() => {
-    setCurrentSavedText(savedText);
-  }, [savedText]);
-
-  useEffect(() => {
-    if (currentSavedText !== savedText && setSavedText) {
-      setSavedText(currentSavedText);
-    }
-  }, [currentSavedText, savedText, setSavedText]);
-
-  // Keep hasChanges in sync between WebRTC and text manager
-  useEffect(() => {
-    setCurrentHasChanges(hasChanges);
-  }, [hasChanges]);
-
-  useEffect(() => {
-    if (currentHasChanges !== hasChanges && setHasChanges) {
-      setHasChanges(currentHasChanges);
-    }
-  }, [currentHasChanges, hasChanges, setHasChanges]);
+  // Set the ref for WebRTC to use updateTextFromExternal
+  updateTextFromExternalRef.current = updateTextFromExternal;
   
   // Draft management hook
   const {
@@ -345,9 +313,9 @@ function TextShareApp() {
       return;
     }
     
-    // Skip loading if polling is paused due to typing
-    if (isPollingPausedFromTyping) {
-      console.log('Skipping text load from server because polling is paused due to typing');
+    // Skip loading if polling is paused due to typing or WebRTC is active
+    if (isPollingPausedFromTyping || isWebRTCActive) {
+      console.log('Skipping text load from server because polling is paused due to typing or WebRTC is active');
       return;
     }
     
@@ -385,31 +353,37 @@ function TextShareApp() {
           console.log('Auto-applying server text - first load (loadedFromServer:', loadedFromServer, ')');
           updateTextFromExternal(serverText);
         } else if (serverText !== text) {
-          console.log('Server text differs from current text - showing toast');
+          console.log('Server text differs from current text');
           console.log('Server text length:', serverText.length, 'Current text length:', text.length);
           console.log('loadedFromServer:', loadedFromServer, 'userEditingRef.current:', userEditingRef.current);
+          console.log('isWebRTCActive:', isWebRTCActive, 'isRtcConnected:', isRtcConnected);
           
           // Update the text area immediately to show the new content
           updateTextFromExternal(serverText);
           
-          // Show toast notification for updates if text has changed
-          const serverTextLength = serverText.length;
-          const currentTextLength = text.length;
-          const diffLength = Math.abs(serverTextLength - currentTextLength);
-          
-          let updateMessage;
-          if (serverTextLength > currentTextLength) {
-            updateMessage = `Content updated (+${diffLength} chars)`;
-          } else if (serverTextLength < currentTextLength) {
-            updateMessage = `Content updated (${diffLength} chars removed.)`;
+          // Only show toast notification if WebRTC is not active/connected
+          if (!isWebRTCActive && !isRtcConnected) {
+            // Show toast notification for updates if text has changed
+            const serverTextLength = serverText.length;
+            const currentTextLength = text.length;
+            const diffLength = Math.abs(serverTextLength - currentTextLength);
+            
+            let updateMessage;
+            if (serverTextLength > currentTextLength) {
+              updateMessage = `Content updated (+${diffLength} chars)`;
+            } else if (serverTextLength < currentTextLength) {
+              updateMessage = `Content updated (${diffLength} chars removed.)`;
+            } else {
+              updateMessage = 'Content modified (same length)';
+            }
+            
+            console.log('Toast message:', updateMessage);
+            setToastMessage(updateMessage);
+            setToastType('info');
+            setShowToast(true);
           } else {
-            updateMessage = 'Content modified (same length)';
+            console.log('WebRTC is active/connected - skipping toast notification');
           }
-          
-          console.log('Toast message:', updateMessage);
-          setToastMessage(updateMessage);
-          setToastType('info');
-          setShowToast(true);
         } else {
           console.log('No action needed - server text matches current text');
         }
@@ -451,7 +425,7 @@ function TextShareApp() {
         console.error('Error loading from localStorage:', e);
       }
     }
-  }, [id, text, loadedFromServer, isPollingPausedFromTyping, updateTextFromExternal]);
+  }, [id, text, loadedFromServer, isPollingPausedFromTyping, isWebRTCActive, updateTextFromExternal]);
   
   // Function to apply server updates
   const applyUpdates = useCallback(() => {
@@ -473,17 +447,22 @@ function TextShareApp() {
       // Reset editing state after applying updates
       resetEditingState();
       
-      // Ensure the toast stays visible for at least 1 second
-      const minimumVisibleTime = 1000; // 1 second
-      
-      // Change toast message to indicate updates were applied
-      setToastMessage('Updates applied successfully');
-      setToastType('success');
-      
-      // Delay hiding the toast to ensure visibility
-      setTimeout(() => {
-        setShowToast(false);
-      }, minimumVisibleTime);
+      // Only show success toast if WebRTC is not active/connected
+      if (!isWebRTCActive && !isRtcConnected) {
+        // Ensure the toast stays visible for at least 1 second
+        const minimumVisibleTime = 1000; // 1 second
+        
+        // Change toast message to indicate updates were applied
+        setToastMessage('Updates applied successfully');
+        setToastType('success');
+        
+        // Delay hiding the toast to ensure visibility
+        setTimeout(() => {
+          setShowToast(false);
+        }, minimumVisibleTime);
+      } else {
+        console.log('WebRTC is active/connected - skipping success toast notification');
+      }
       
       // Clear any existing reset timer
       if (window.userEditingResetTimer) {
@@ -512,9 +491,13 @@ function TextShareApp() {
   useEffect(() => {
     console.log('Initial load effect triggered, id:', id);
     if (id) {
-      // Initialize text from server
-      console.log('Initializing text from server for session:', id);
-      loadTextFromServer();
+      // Only load from server if WebRTC is not active to avoid conflicts
+      if (!isWebRTCActive) {
+        console.log('Initializing text from server for session:', id);
+        loadTextFromServer();
+      } else {
+        console.log('Skipping server load because WebRTC is active');
+      }
       
       // If there's seed data, use it
       if (seedData && !loadedFromServer) {
@@ -527,7 +510,7 @@ function TextShareApp() {
     } else {
       console.log('No session ID available, not loading text');
     }
-  }, [id, seedData, loadTextFromServer, loadedFromServer]);
+  }, [id, seedData, loadedFromServer, isWebRTCActive]); // Removed loadTextFromServer from dependencies to prevent unnecessary re-runs
   
   // Set up server polling using custom hook
   useServerPolling({
@@ -723,11 +706,16 @@ function TextShareApp() {
             onCopy={handleCopy}
             onShare={handleShare}
             onRefresh={() => {
-              // If typing is happening, we'll save first then load from server
-              if (isPollingPausedFromTyping && hasChanges) {
-                handleSave();
+              // Only refresh from server if WebRTC is not active
+              if (!isWebRTCActive) {
+                // If typing is happening, we'll save first then load from server
+                if (isPollingPausedFromTyping && hasChanges) {
+                  handleSave();
+                }
+                loadTextFromServer();
+              } else {
+                console.log('Skipping server refresh because WebRTC is active');
               }
-              loadTextFromServer();
             }}
             showRTCControls={rtcSupported}
             rtcSupported={rtcSupported}

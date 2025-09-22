@@ -26,6 +26,7 @@ const SOCKET_SERVER_URL =
  * @param {function} setLastServerText - Function to update last server text value
  * @param {function} setHasChanges - Function to update hasChanges value
  * @param {boolean} isTyping - Whether user is currently typing
+ * @param {function} onWebRTCTextUpdate - Handler for WebRTC text updates (prevents broadcast loops)
  * @returns {Object} WebRTC connection state and methods
  */
 export const useWebRTCManager = (
@@ -36,7 +37,8 @@ export const useWebRTCManager = (
   setServerText,
   setLastServerText,
   setHasChanges,
-  isTyping
+  isTyping,
+  onWebRTCTextUpdate
 ) => {
   // State for tracking WebRTC status
   const [rtcSupported, setRtcSupported] = useState(false);
@@ -564,21 +566,28 @@ export const useWebRTCManager = (
     // Update our last received text reference
     lastReceivedTextRef.current = newText;
     
-    // Only update if we're not currently typing
-    if (!isTypingRef.current) {
-      console.log('Not currently typing, updating text immediately');
-      setText(newText);
-      setSavedText(newText);
-      setServerText(newText);
-      setLastServerText(newText);
-      lastServerTextRef.current = newText;
-      setHasChanges(false);
+    // Use the callback to handle WebRTC text updates without triggering broadcast loops
+    if (onWebRTCTextUpdate) {
+      console.log('Using WebRTC text update handler');
+      onWebRTCTextUpdate(newText);
     } else {
-      console.log('Currently typing, saving update for later');
-      // Save for later application when we're done typing
-      pendingTextUpdatesRef.current = newText;
+      // Fallback to original behavior if no callback provided
+      // Only update if we're not currently typing
+      if (!isTypingRef.current) {
+        console.log('Not currently typing, updating text immediately');
+        setText(newText);
+        setSavedText(newText);
+        setServerText(newText);
+        setLastServerText(newText);
+        lastServerTextRef.current = newText;
+        setHasChanges(false);
+      } else {
+        console.log('Currently typing, saving update for later');
+        // Save for later application when we're done typing
+        pendingTextUpdatesRef.current = newText;
+      }
     }
-  }, [setText, setSavedText, setServerText, setLastServerText, setHasChanges]);
+  }, [onWebRTCTextUpdate, setText, setSavedText, setServerText, setLastServerText, setHasChanges]);
   
   // Set up data channel for a peer
   const setupDataChannel = useCallback((dataChannel, peerId) => {
