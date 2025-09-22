@@ -10,6 +10,10 @@
   --warning-color: #ffb703;
   --textarea-bg: #ffffff;
   --textarea-text: #212529;
+  --button-bg: #f0f0f0;
+  --button-color: #333;
+  --button-border: #ccc;
+  --button-hover-bg: #e0e0e0;
   /* Hint to browsers about default control theme */
   color-scheme: light;
 }
@@ -26,6 +30,10 @@
   --warning-color: #fbbf24;
   --textarea-bg: #2d2d2d;
   --textarea-text: #e0e0e0;
+  --button-bg: #404040;
+  --button-color: #e0e0e0;
+  --button-border: #666;
+  --button-hover-bg: #505050;
   /* Ensure form controls adopt dark styling where applicable */
   color-scheme: dark;
 }
@@ -255,35 +263,9 @@ body.dark-theme {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
-/* Toast notification */
-.toast-notification {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  background-color: var(--success-color);
-  color: white;
-  padding: 12px 16px;
-  border-radius: 6px;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
-  z-index: 9999;
-  font-size: 0.9rem;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 300px;
-  animation: toastFadeInOut 3s ease-in-out forwards;
-}
 
-.toast-notification .toast-icon {
-  font-size: 1.1rem;
-}
 
-@keyframes toastFadeInOut {
-  0% { opacity: 0; transform: translateY(-20px); }
-  10% { opacity: 1; transform: translateY(0); }
-  90% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(-20px); }
-}
+
 
 /* Home Page Styles */
 .home-container {
@@ -849,6 +831,19 @@ textarea::placeholder {
   text-decoration: underline;
 }
 
+.footer-home-link {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-size: 1rem;
+  font-weight: 500;
+  display: inline-block;
+  margin-bottom: 0.5rem;
+}
+
+.footer-home-link:hover {
+  text-decoration: underline;
+}
+
 /* Error Page */
 .error-container {
   text-align: center;
@@ -1181,39 +1176,6 @@ textarea::placeholder {
   /* No forced text colors on mobile; respect theme variables */
 }
 
-/* Toast notification styles */
-.toast-notification {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  background-color: #ff8800; /* Bright orange color */
-  color: white;
-  padding: 12px 20px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
-  animation: toast-slide-in 0.3s ease-out forwards;
-  font-weight: 500;
-  max-width: 300px;
-  border-left: 4px solid #cc6600; /* Darker orange for the border */
-}
-
-.dark-theme .toast-notification {
-  background-color: #ff8800; /* Keep the same orange in dark theme too */
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  border-left: 4px solid #cc6600;
-}
-
-@keyframes toast-slide-in {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
 
 /* Text tabs for draft/shared text switching */
 .text-tabs {

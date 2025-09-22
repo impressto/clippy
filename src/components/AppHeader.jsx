@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSync } from '@fortawesome/free-solid-svg-icons';
+import { faSync, faFlask } from '@fortawesome/free-solid-svg-icons';
 import ThemeToggle from './ThemeToggle';
 
 /**
@@ -16,7 +16,7 @@ const AppHeader = ({
   lastChecked = null, 
   text = '', 
   serverText = '',
-  isRtcConnected = false
+  isRtcConnected = true
 }) => {
   return (
     <div className="app-header">

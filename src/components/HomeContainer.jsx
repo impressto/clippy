@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlay } from '@fortawesome/free-solid-svg-icons';
 import ThemeToggle from './ThemeToggle.jsx';
-import Footer from './Footer.jsx';
 import { useTheme } from '../theme/ThemeContext.jsx';
 
 /**
@@ -62,7 +61,6 @@ const HomeContainer = ({ LOGO_URL, API_BASE_URL }) => {
           <li>Choose when to apply updates so your typing won't be interrupted</li>
         </ul>
       </div>
-      <Footer />
     </div>
   );
 };

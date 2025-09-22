@@ -9,8 +9,9 @@ import ControlsBar from './components/ControlsBar.jsx';
 import Footer from './components/Footer.jsx';
 import ShareModal from './components/ShareModal.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
+import Toast from './components/Toast.jsx';
 import { useTheme } from './theme/ThemeContext.jsx';
-import { useWebRTCManager } from './utils/WebRTCSocketManager.js';
+// import { useWebRTCManager } from './utils/WebRTCSocketManager.js'; // TEMPORARILY DISABLED
 
 // Constants
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -63,6 +64,7 @@ function TextShareApp() {
   const [isServerOnline, setIsServerOnline] = useState(true);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [socketClients, setSocketClients] = useState(0);
+  const [isPollingPausedFromTyping, setIsPollingPausedFromTyping] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState(() => {
     // Load from localStorage if available
     const saved = localStorage.getItem('autoUpdate');
@@ -73,44 +75,52 @@ function TextShareApp() {
   const [draftText, setDraftText] = useState('');
   const [showDraft, setShowDraft] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('info');
   
   // Refs
   const textAreaRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const isTypingRef = useRef(false);
   const savingTimeoutRef = useRef(null);
-  const clientIdRef = useRef(null);
   const lastActivityTimeRef = useRef(Date.now());
   const userEditingRef = useRef(false);
   
-  // Generate a client ID if we don't have one
-  if (!clientIdRef.current) {
-    clientIdRef.current = Math.random().toString(36).substring(2, 10);
-    console.log(`Generated client ID: ${clientIdRef.current}`);
-  }
+  // Initialize WebRTC - TEMPORARILY DISABLED to focus on share.php polling
+  // const {
+  //   rtcSupported,
+  //   rtcConnected,
+  //   connectionStatus,
+  //   activeUsers,
+  //   dataChannelStatus,
+  //   setDebugMode,
+  //   webRtcConnectionStage: rtcStage,
+  //   isPollingPaused: rtcPollingPaused,
+  //   sendTextToAllPeers,
+  //   initiatePeerConnections
+  // } = useWebRTCManager(
+  //   id,
+  //   text,
+  //   setText,
+  //   setSavedText,
+  //   setServerText,
+  //   setLastServerText,
+  //   setHasChanges,
+  //   isTypingRef.current
+  // );
   
-  // Initialize WebRTC
-  const {
-    rtcSupported,
-    rtcConnected,
-    connectionStatus,
-    activeUsers,
-    dataChannelStatus,
-    setDebugMode,
-    webRtcConnectionStage: rtcStage,
-    isPollingPaused: rtcPollingPaused,
-    sendTextToAllPeers,
-    initiatePeerConnections
-  } = useWebRTCManager(
-    id,
-    text,
-    setText,
-    setSavedText,
-    setServerText,
-    setLastServerText,
-    setHasChanges,
-    isTypingRef.current
-  );
+  // Placeholder values for disabled WebRTC
+  const rtcSupported = false;
+  const rtcConnected = false;
+  const connectionStatus = 'disabled';
+  const activeUsers = 1;
+  const dataChannelStatus = {};
+  const setDebugMode = () => {};
+  const rtcStage = 'disabled';
+  const rtcPollingPaused = false;
+  const sendTextToAllPeers = () => {};
+  const initiatePeerConnections = () => {};
   
   // Update our state when WebRTCSocketManager state changes
   useEffect(() => {
@@ -135,6 +145,9 @@ function TextShareApp() {
     return () => {
       if (window.userEditingResetTimer) {
         clearTimeout(window.userEditingResetTimer);
+      }
+      if (savingTimeoutRef.current) {
+        clearTimeout(savingTimeoutRef.current);
       }
     };
   }, []);
@@ -227,7 +240,11 @@ function TextShareApp() {
       setHasChanges(newText !== serverText);
       userEditingRef.current = true;
       
-      // Handle auto-save with debounce
+      // Pause polling while typing
+      setIsPollingPausedFromTyping(true);
+      console.log('Polling paused due to typing - waiting for Save button click');
+      
+      // Clear any existing auto-save timer
       if (savingTimeoutRef.current) {
         clearTimeout(savingTimeoutRef.current);
       }
@@ -238,18 +255,20 @@ function TextShareApp() {
       }
       window.userEditingResetTimer = setTimeout(() => {
         userEditingRef.current = false;
+        // Do not resume polling here - we'll wait for the Save button click
       }, 3000); // Reset after 3 seconds of no typing
       
-      savingTimeoutRef.current = setTimeout(() => {
-        handleSave();
-      }, 2000); // Auto-save after 2 seconds of inactivity
+      // Remove auto-save functionality - wait for explicit save button click
+      // savingTimeoutRef.current = setTimeout(() => {
+      //   handleSave();
+      // }, 2000);
       
-      // If connected via WebRTC, broadcast to peers
-      if (rtcConnected) {
-        sendTextToAllPeers(newText);
-      }
+      // WebRTC disabled - no need to broadcast to peers
+      // if (rtcConnected) {
+      //   sendTextToAllPeers(newText);
+      // }
     }
-  }, [text, serverText, rtcConnected, sendTextToAllPeers, handleTypingStart, showDraft, setDraftText, id]);
+  }, [text, serverText, handleTypingStart, showDraft, setDraftText, id, setIsPollingPausedFromTyping]);
   
   // Handle save operation
   const handleSave = useCallback(async () => {
@@ -268,7 +287,6 @@ function TextShareApp() {
     try {
       const headers = new Headers();
       headers.append('Content-Type', 'application/json');
-      headers.append('X-Client-ID', clientIdRef.current);
       
       const response = await fetch(`${API_BASE_URL}/share.php?id=${id}`, {
         method: 'POST',
@@ -283,6 +301,10 @@ function TextShareApp() {
         setLastServerText(tempText);
         setHasChanges(false);
         console.log('Text saved to server');
+        
+        // Resume polling after saving
+        setIsPollingPausedFromTyping(false);
+        console.log('Polling resumed after saving');
         
         // Update online status if it was offline
         if (!isServerOnline) {
@@ -323,14 +345,16 @@ function TextShareApp() {
       return;
     }
     
+    // Skip loading if polling is paused due to typing
+    if (isPollingPausedFromTyping) {
+      console.log('Skipping text load from server because polling is paused due to typing');
+      return;
+    }
+    
     try {
       console.log(`Loading text from server for session ${id}`);
-      const headers = new Headers();
-      headers.append('X-Client-ID', clientIdRef.current || 'unknown');
       
-      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=true`, {
-        headers
-      });
+      const response = await fetch(`${API_BASE_URL}/share.php?id=${id}&track=true`);
       
       if (!response.ok) {
         throw new Error(`Server returned ${response.status}: ${response.statusText}`);
@@ -357,13 +381,41 @@ function TextShareApp() {
         setLastServerText(serverText);
         
         // Only update the text if we haven't loaded yet or user isn't editing
-        if (!loadedFromServer || !userEditingRef.current) {
+        if (!loadedFromServer) {
+          console.log('Auto-applying server text - first load (loadedFromServer:', loadedFromServer, ')');
           setText(serverText);
           setSavedText(serverText);
           setHasChanges(false);
         } else if (serverText !== text) {
-          // If we already loaded and the server text is different, mark changes
-          setHasChanges(true);
+          console.log('Server text differs from current text - showing toast');
+          console.log('Server text length:', serverText.length, 'Current text length:', text.length);
+          console.log('loadedFromServer:', loadedFromServer, 'userEditingRef.current:', userEditingRef.current);
+          
+          // Update the text area immediately to show the new content
+          setText(serverText);
+          setSavedText(serverText);
+          setHasChanges(false);
+          
+          // Show toast notification for updates if text has changed
+          const serverTextLength = serverText.length;
+          const currentTextLength = text.length;
+          const diffLength = Math.abs(serverTextLength - currentTextLength);
+          
+          let updateMessage;
+          if (serverTextLength > currentTextLength) {
+            updateMessage = `Content updated (+${diffLength} chars)`;
+          } else if (serverTextLength < currentTextLength) {
+            updateMessage = `Content updated (${diffLength} chars removed.)`;
+          } else {
+            updateMessage = 'Content modified (same length)';
+          }
+          
+          console.log('Toast message:', updateMessage);
+          setToastMessage(updateMessage);
+          setToastType('info');
+          setShowToast(true);
+        } else {
+          console.log('No action needed - server text matches current text');
         }
         
         // Mark as loaded
@@ -404,7 +456,7 @@ function TextShareApp() {
         console.error('Error loading from localStorage:', e);
       }
     }
-  }, [id, text, loadedFromServer]);
+  }, [id, text, loadedFromServer, isPollingPausedFromTyping]);
   
   // Function to apply server updates
   const applyUpdates = useCallback(() => {
@@ -432,6 +484,18 @@ function TextShareApp() {
       setUpdatesAvailable(false);
       // Reset editing state after applying updates
       userEditingRef.current = false;
+      
+      // Ensure the toast stays visible for at least 1 second
+      const minimumVisibleTime = 1000; // 1 second
+      
+      // Change toast message to indicate updates were applied
+      setToastMessage('Updates applied successfully');
+      setToastType('success');
+      
+      // Delay hiding the toast to ensure visibility
+      setTimeout(() => {
+        setShowToast(false);
+      }, minimumVisibleTime);
       
       // Clear any existing reset timer
       if (window.userEditingResetTimer) {
@@ -479,9 +543,20 @@ function TextShareApp() {
   
   // Set up periodic polling for updates if autoUpdate is enabled
   useEffect(() => {
-    if (!id || isRtcConnected || !autoUpdate) return;
+    // For now, ignore WebRTC connection status and focus on share.php polling
+    // TODO: Re-enable WebRTC condition when socket server is running
+    // if (!id || isRtcConnected || !autoUpdate || isPollingPausedFromTyping) return;
+    if (!id || !autoUpdate || isPollingPausedFromTyping) return;
+    
+    console.log('Setting up polling, isPollingPausedFromTyping:', isPollingPausedFromTyping, 'isRtcConnected:', isRtcConnected);
     
     const checkInterval = setInterval(() => {
+      // Skip polling if typing has been detected since interval started
+      if (isPollingPausedFromTyping) {
+        console.log('Skipping poll because user is typing');
+        return;
+      }
+      
       loadTextFromServer().then(() => {
         setLastChecked(new Date());
         // Check if there are updates available
@@ -501,7 +576,7 @@ function TextShareApp() {
     }, 10000); // Check every 10 seconds
 
     return () => clearInterval(checkInterval);
-  }, [id, isRtcConnected, autoUpdate, loadTextFromServer, serverText, text, applyUpdates]);
+  }, [id, autoUpdate, loadTextFromServer, serverText, text, applyUpdates, isPollingPausedFromTyping]);
   
   // Handle copy to clipboard
   const handleCopy = useCallback(() => {
@@ -678,6 +753,32 @@ function TextShareApp() {
     alert('Debug information has been logged to the console');
   }, [connectionStatus, activeUsers, rtcSupported, rtcConnected, rtcStage, dataChannelStatus]);
   
+  // Handle toast close
+  const handleToastClose = useCallback(() => {
+    setShowToast(false);
+  }, []);
+  
+  // Handle toast click
+  const handleToastClick = useCallback(() => {
+    const clickTime = Date.now();
+    
+    // Apply updates immediately
+    applyUpdates();
+    
+    // Ensure the toast stays visible for at least 1 second
+    const timeElapsed = Date.now() - clickTime;
+    const minimumVisibleTime = 1000; // 1 second
+    
+    if (timeElapsed < minimumVisibleTime) {
+      // Keep toast visible temporarily
+      setTimeout(() => {
+        setShowToast(false);
+      }, minimumVisibleTime - timeElapsed);
+    } else {
+      setShowToast(false);
+    }
+  }, [applyUpdates]);
+  
   // Render
   return (
     <div className={`app-container ${theme}`}>
@@ -713,6 +814,7 @@ function TextShareApp() {
             lastChecked={lastChecked}
             text={text}
             serverText={serverText}
+            isRtcConnected={isRtcConnected}
           />
           
           <TextAreaContainer
@@ -745,7 +847,13 @@ function TextShareApp() {
             onSave={handleSave}
             onCopy={handleCopy}
             onShare={handleShare}
-            onRefresh={loadTextFromServer}
+            onRefresh={() => {
+              // If typing is happening, we'll save first then load from server
+              if (isPollingPausedFromTyping && hasChanges) {
+                handleSave();
+              }
+              loadTextFromServer();
+            }}
             showRTCControls={rtcSupported}
             rtcPollingPaused={isRtcPollingPaused}
             rtcStage={rtcStage}
@@ -753,7 +861,7 @@ function TextShareApp() {
             activeUsers={activeUsers}
             connectedPeers={Object.keys(dataChannelStatus || {})}
             setShowShareModal={setShowModal}
-            isPollingPaused={isRtcPollingPaused}
+            isPollingPaused={isRtcPollingPaused || isPollingPausedFromTyping}
             status={hasChanges ? "unsaved" : "saved"}
           />
           
@@ -767,6 +875,16 @@ function TextShareApp() {
               rtcConnected={isRtcConnected}
             />
           )}
+          
+          {/* Toast notification for updates */}
+          <Toast 
+            message={toastMessage}
+            type={toastType}
+            show={showToast}
+            onClose={handleToastClose}
+            onClick={handleToastClick}
+            duration={5000}
+          />
         </>
       )}
     </div>
