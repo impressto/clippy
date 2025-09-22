@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faSync, faShare, faUsers } from '@fortawesome/free-solid-svg-icons';
+import { faSave, faSync, faShare, faUsers, faUserPlus, faUserMinus } from '@fortawesome/free-solid-svg-icons';
 import './ControlsBar.css'; // Import the CSS for WebRTC status styles
 
 /**

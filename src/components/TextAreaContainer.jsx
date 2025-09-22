@@ -20,6 +20,7 @@ const TextAreaContainer = ({
   applyDraft,
   text,
   handleTextChange,
+  handleDraftChange,
   MAX_TEXT_LENGTH
 }) => {
   // Log when props change
@@ -41,6 +42,19 @@ const TextAreaContainer = ({
       applyDraft();
     } else {
       console.error('applyDraft is not a function:', applyDraft);
+    }
+  };
+  
+  // Handle text changes based on current mode (main text vs draft)
+  const handleChange = (e) => {
+    if (showDraft) {
+      // Handle draft text changes
+      if (handleDraftChange) {
+        handleDraftChange(e.target.value);
+      }
+    } else {
+      // Handle main text changes
+      handleTextChange(e);
     }
   };
   
@@ -91,7 +105,7 @@ const TextAreaContainer = ({
       </div>
       <textarea 
         value={showDraft ? draftText : text} 
-        onChange={handleTextChange} 
+        onChange={handleChange}
         className="share-textarea"
         placeholder={showDraft ? "Your private draft text..." : "Start typing here..."}
         maxLength={MAX_TEXT_LENGTH}
