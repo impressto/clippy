@@ -10,6 +10,7 @@ import { useState, useRef, useCallback } from 'react';
  * @param {number} config.MAX_TEXT_LENGTH - Maximum allowed text length
  * @param {function} config.setIsPollingPausedFromTyping - Function to control polling pause state
  * @param {function} config.handleTypingStart - Function to handle typing start
+ * @param {function} config.broadcastTextToAllPeers - Optional function to broadcast text to WebRTC peers
  * @returns {Object} Text management state and functions
  */
 export const useTextManager = ({
@@ -17,7 +18,8 @@ export const useTextManager = ({
   serverText,
   MAX_TEXT_LENGTH,
   setIsPollingPausedFromTyping,
-  handleTypingStart
+  handleTypingStart,
+  broadcastTextToAllPeers
 }) => {
   // Text state
   const [text, setText] = useState('');
@@ -50,6 +52,11 @@ export const useTextManager = ({
       setHasChanges(newText !== serverText);
       userEditingRef.current = true;
       
+      // Broadcast text to WebRTC peers if available
+      if (broadcastTextToAllPeers && typeof broadcastTextToAllPeers === 'function') {
+        broadcastTextToAllPeers(newText);
+      }
+      
       // Pause polling while typing
       setIsPollingPausedFromTyping(true);
       console.log('Polling paused due to typing - waiting for Save button click');
@@ -68,7 +75,7 @@ export const useTextManager = ({
         // Do not resume polling here - we'll wait for the Save button click
       }, 3000); // Reset after 3 seconds of no typing
     }
-  }, [text, serverText, handleTypingStart, MAX_TEXT_LENGTH, setIsPollingPausedFromTyping]);
+  }, [text, serverText, handleTypingStart, MAX_TEXT_LENGTH, setIsPollingPausedFromTyping, broadcastTextToAllPeers]);
   
   /**
    * Update text state from external source (e.g., server, WebRTC)

@@ -80,6 +80,43 @@ function TextShareApp() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('info');
+
+  // Temporary state for text that WebRTC needs 
+  const [currentText, setCurrentText] = useState('');
+  const [currentSavedText, setCurrentSavedText] = useState('');
+  const [currentHasChanges, setCurrentHasChanges] = useState(false);
+
+  // WebRTC connection management 
+  const {
+    rtcSupported,
+    rtcConnected,
+    connectionStatus,
+    activeUsers: webrtcActiveUsers,
+    dataChannelStatus,
+    broadcastTextToAllPeers,
+    sendPresenceAnnouncement,
+    setDebugMode,
+    clientId,
+    webRtcConnectionStage,
+    initiatePeerConnections,
+    peerDiscoveryEnabled,
+    setPeerDiscoveryEnabled,
+    startPeerSearch,
+    disconnectPeers,
+    debugMode,
+    debugData,
+    sendTextToAllPeers,
+    isPollingPaused
+  } = useWebRTCManager(
+    id,
+    currentText,
+    setCurrentText,
+    setCurrentSavedText,
+    setServerText,
+    setLastServerText,
+    setCurrentHasChanges,
+    isTypingRef.current
+  );
   
   // Text management hook
   const {
@@ -100,8 +137,43 @@ function TextShareApp() {
     serverText,
     MAX_TEXT_LENGTH,
     setIsPollingPausedFromTyping,
-    handleTypingStart
+    handleTypingStart,
+    broadcastTextToAllPeers: isRtcConnected ? sendTextToAllPeers : null
   });
+
+  // Keep currentText in sync with text from text manager
+  useEffect(() => {
+    setCurrentText(text);
+  }, [text]);
+
+  // Keep text manager in sync with WebRTC text updates
+  useEffect(() => {
+    if (currentText !== text) {
+      setText(currentText);
+    }
+  }, [currentText, text, setText]);
+
+  // Keep savedText in sync between WebRTC and text manager
+  useEffect(() => {
+    setCurrentSavedText(savedText);
+  }, [savedText]);
+
+  useEffect(() => {
+    if (currentSavedText !== savedText && setSavedText) {
+      setSavedText(currentSavedText);
+    }
+  }, [currentSavedText, savedText, setSavedText]);
+
+  // Keep hasChanges in sync between WebRTC and text manager
+  useEffect(() => {
+    setCurrentHasChanges(hasChanges);
+  }, [hasChanges]);
+
+  useEffect(() => {
+    if (currentHasChanges !== hasChanges && setHasChanges) {
+      setHasChanges(currentHasChanges);
+    }
+  }, [currentHasChanges, hasChanges, setHasChanges]);
   
   // Draft management hook
   const {
@@ -130,35 +202,6 @@ function TextShareApp() {
   // Refs for activity tracking
   const lastActivityTimeRef = useRef(Date.now());
   
-    // Initialize WebRTC manager
-  const {
-    rtcSupported,
-    rtcConnected,
-    connectionStatus,
-    activeUsers,
-    dataChannelStatus,
-    setDebugMode,
-    webRtcConnectionStage: rtcStage,
-    isPollingPaused: rtcPollingPaused,
-    sendTextToAllPeers,
-    initiatePeerConnections,
-    peerDiscoveryEnabled,
-    setPeerDiscoveryEnabled,
-    startPeerSearch,
-    disconnectPeers,
-    debugMode,
-    debugData
-  } = useWebRTCManager(
-    id,
-    text,
-    setText,
-    setSavedText,
-    setServerText,
-    setLastServerText,
-    setHasChanges,
-    isTypingRef.current
-  );
-  
   // Update our state when WebRTCSocketManager state changes
   useEffect(() => {
     if (rtcConnected !== undefined) {
@@ -175,10 +218,10 @@ function TextShareApp() {
   }, [peerDiscoveryEnabled, rtcConnected]);
   
   useEffect(() => {
-    if (rtcPollingPaused !== undefined) {
-      setIsRtcPollingPaused(rtcPollingPaused);
+    if (isPollingPaused !== undefined) {
+      setIsRtcPollingPaused(isPollingPaused);
     }
-  }, [rtcPollingPaused]);
+  }, [isPollingPaused]);
   
   // Save autoUpdate preference
   useEffect(() => {
@@ -563,25 +606,25 @@ function TextShareApp() {
     }
     
     if (rtcConnected) {
-      const otherClients = activeUsers - 1;
+      const otherClients = webrtcActiveUsers - 1;
       const clientLabel = otherClients === 1 ? 'client' : 'clients';
       return `Connected via WebRTC\n(${otherClients} other ${clientLabel})`;
     }
     
-    if (rtcStage === 'connecting') {
+    if (webRtcConnectionStage === 'connecting') {
       return 'WebRTC connecting...';
     }
     
-    if (rtcStage === 'discovering') {
+    if (webRtcConnectionStage === 'discovering') {
       return 'Looking for peers...';
     }
     
-    if (rtcStage === 'failed') {
+    if (webRtcConnectionStage === 'failed') {
       return 'WebRTC connection failed';
     }
     
     return 'WebRTC ready';
-  }, [rtcSupported, rtcConnected, rtcStage, activeUsers]);
+  }, [rtcSupported, rtcConnected, webRtcConnectionStage, webrtcActiveUsers]);
   
   // Enable WebRTC Debug
   const handleDebugWebRTC = useCallback(() => {
@@ -595,14 +638,14 @@ function TextShareApp() {
     // Log connection status to console
     console.log('WebRTC debug information:', {
       connectionStatus,
-      activeUsers,
+      activeUsers: webrtcActiveUsers,
       rtcSupported,
       rtcConnected,
-      webRtcConnectionStage: rtcStage,
+      webRtcConnectionStage,
       dataChannelStatus
     });
     alert('Debug information has been logged to the console');
-  }, [connectionStatus, activeUsers, rtcSupported, rtcConnected, rtcStage, dataChannelStatus]);
+  }, [connectionStatus, webrtcActiveUsers, rtcSupported, rtcConnected, webRtcConnectionStage, dataChannelStatus]);
   
   // Handle toast close
   const handleToastClose = useCallback(() => {
@@ -635,7 +678,7 @@ function TextShareApp() {
             showRTCStatus={true}
             rtcStatus={getWebRTCStatusMessage()}
             rtcConnected={isRtcConnected}
-            rtcStage={rtcStage}
+            rtcStage={webRtcConnectionStage}
             onDebugWebRTC={handleDebugWebRTC}
             onSubmitDebugLogs={handleSubmitDebugLogs}
             autoUpdate={autoUpdate}
@@ -653,7 +696,7 @@ function TextShareApp() {
             text={text}
             handleTextChange={handleChange}
             handleDraftChange={handleDraftChange}
-            rtcStatus={rtcStage}
+            rtcStatus={webRtcConnectionStage}
             isTyping={isTyping}
             draftText={draftText}
             showDraft={showDraft}
@@ -689,9 +732,9 @@ function TextShareApp() {
             showRTCControls={rtcSupported}
             rtcSupported={rtcSupported}
             rtcPollingPaused={isRtcPollingPaused}
-            rtcStage={rtcStage}
-            webRtcConnectionStage={rtcStage}
-            activeUsers={activeUsers}
+            rtcStage={webRtcConnectionStage}
+            webRtcConnectionStage={webRtcConnectionStage}
+            activeUsers={webrtcActiveUsers}
             connectedPeers={Object.keys(dataChannelStatus || {})}
             setShowShareModal={setShowModal}
             isPollingPaused={isRtcPollingPaused || isPollingPausedFromTyping}

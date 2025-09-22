@@ -649,7 +649,7 @@ export const useWebRTCManager = (
   
   // Function to broadcast text to all connected peers
   const broadcastTextToAllPeers = useCallback((textToSend) => {
-    if (!text || text === lastSentTextRef.current) {
+    if (!textToSend || textToSend === lastSentTextRef.current) {
       return; // Don't send if nothing changed
     }
     
